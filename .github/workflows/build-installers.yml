@@ -76,8 +76,10 @@ jobs:
           set -euo pipefail
           image=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)
           test -n "$image"
-          mount_dir=$(mktemp -d)
-          test_home=$(mktemp -d)
+          # macOS /var is a symlink to /private/var. Tauri intentionally rejects
+          # executable paths containing symlinks, so launch from the physical path.
+          mount_dir=$(cd "$(mktemp -d)" && pwd -P)
+          test_home=$(cd "$(mktemp -d)" && pwd -P)
           app_pid=''
           cleanup() {
             if [ -n "$app_pid" ]; then kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true; fi
