@@ -19,6 +19,7 @@ function load(file, imports, globals = {}) {
   }).outputText;
   vm.runInNewContext(code, {
     module, exports: module.exports, console, setTimeout, clearTimeout, TextEncoder, TextDecoder,
+    AbortController: globalThis.AbortController,
     require: name => name in imports ? imports[name] : require(name), ...globals,
   }, { filename: file });
   return module.exports;

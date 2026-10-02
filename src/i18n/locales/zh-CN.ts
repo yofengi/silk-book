@@ -2,6 +2,8 @@
 // 插值 {name}；{app} 自动替换为 productName()；复数用 ICU 子集 {count, plural, one {# x} other {# xs}}。
 export const zhCN = {
   common: {
+    confirm: '确认',
+    confirmTitle: '确认操作',
     cancel: '取消',
     close: '关闭',
     delete: '删除',

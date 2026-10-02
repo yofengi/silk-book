@@ -68,6 +68,7 @@ Var UpdateMode
 Var NoShortcutMode
 Var WixMode
 Var OldMainBinaryName
+Var AssociationPreviousUninstalled
 
 Name "${PRODUCTNAME}"
 BrandingText "${COPYRIGHT}"
@@ -311,6 +312,9 @@ Function PageLeaveReinstall
   ${EndIf}
 
   reinst_uninstall:
+    ; A user may have changed the old app's associations while this wizard was
+    ; open. Snapshot the current selection immediately before removing it.
+    Call BackupAssociationChoices
     HideWindow
     ClearErrors
 
@@ -347,6 +351,7 @@ Function PageLeaveReinstall
       MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
       Abort
     ${EndIf}
+    StrCpy $AssociationPreviousUninstalled 1
   reinst_done:
 FunctionEnd
 
@@ -367,8 +372,8 @@ Var AppStartMenuFolder
 ; 7. Installation page
 !insertmacro MUI_PAGE_INSTFILES
 
-; 8. File associations. Passive (/P) and silent (/S) installers skip this page
-; and never invoke the app CLI, so unattended installs register nothing.
+; 8. New interactive installs offer choices. Existing choices are restored by
+; POSTINSTALL and bypass this page, preserving partial and explicit empty sets.
 Var AssocText
 Var AssocMarkdown
 Var AssocCode
@@ -391,6 +396,9 @@ Function AssociationPageCreate
   ${OrIf} ${Silent}
     Abort
   ${EndIf}
+  ${If} ${FileExists} "$APPDATA\Boshu\associations.json"
+    Abort
+  ${EndIf}
   nsDialogs::Create 1018
   Pop $AssocPage
   ${If} $AssocPage == error
@@ -399,7 +407,7 @@ Function AssociationPageCreate
 
   !insertmacro MUI_HEADER_TEXT "文件关联" "选择帛书可以打开的文件类型"
 
-  ${NSD_CreateLabel} 12u 8u 310u 22u "安装后，双击这些文件类型即可使用帛书打开。"
+  ${NSD_CreateLabel} 12u 8u 310u 22u "将帛书加入这些文件类型的打开方式列表。"
   Pop $AssocIntro
 
   ${NSD_CreateGroupBox} 10u 35u 312u 48u "文本文件"
@@ -474,10 +482,10 @@ Function RegisterSelectedAssociations
     Return
   ${EndIf}
   ${If} $AssocText == ""
-    Return
+    StrCpy $AssocText "none"
   ${EndIf}
   ClearErrors
-  ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --register-assoc "$AssocText"' $0
+  ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --replace-assoc "$AssocText"' $0
   ${If} ${Errors}
     MessageBox MB_ICONEXCLAMATION|MB_OK "文件关联设置失败。你可以稍后在帛书设置中重试。"
   ${ElseIf} $0 <> 0
@@ -608,6 +616,29 @@ Function .onInit
   !if "${INSTALLMODE}" == "both"
     !insertmacro MULTIUSER_INIT
   !endif
+
+  ; Older executables cannot persist their association choices. Run this
+  ; incoming executable only as a snapshot helper before any old uninstaller
+  ; or file replacement. The snapshot is staged under the old data directory,
+  ; so an old uninstaller's Delete app data choice also deletes the snapshot.
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\boshu-associations.exe" "${MAINBINARYSRCPATH}"
+  Call BackupAssociationChoices
+FunctionEnd
+
+Function BackupAssociationChoices
+  Push $0
+  ClearErrors
+  ExecWait '"$PLUGINSDIR\boshu-associations.exe" --backup-assoc' $0
+  ${If} ${Errors}
+    StrCpy $0 1
+  ${EndIf}
+  ${If} $0 <> 0
+    MessageBox MB_ICONEXCLAMATION|MB_OK "无法保存已有文件关联，请检查用户数据目录权限后重试。" /SD IDOK
+    SetErrorLevel 1
+    Quit
+  ${EndIf}
+  Pop $0
 FunctionEnd
 
 
@@ -730,6 +761,12 @@ Section Install
   !endif
 
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
+  ; In-place installs capture after closing the old app, before replacing it.
+  ; An uninstall-first install already captured before its registry was removed.
+  ${If} $AssociationPreviousUninstalled <> 1
+    Call BackupAssociationChoices
+  ${EndIf}
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -862,11 +899,11 @@ FunctionEnd
 
 Section Uninstall
 
+  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+
   !ifmacrodef NSIS_HOOK_PREUNINSTALL
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
-
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Delete the app directory and its content from disk
   ; Copy main executable
@@ -966,6 +1003,8 @@ Section Uninstall
     DeleteRegKey /ifempty HKCU "${MANUKEY}"
 
     SetShellVarContext current
+    ; PREUNINSTALL removes Boshu's actual settings directory through the CLI.
+    ; These are the separate, standard Tauri data/cache directories.
     RmDir /r "$APPDATA\${BUNDLEID}"
     RmDir /r "$LOCALAPPDATA\${BUNDLEID}"
   ${EndIf}

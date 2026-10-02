@@ -9,7 +9,7 @@ import { t } from '../i18n';
 import { errorMessage, ipc, type QuitRequest } from '../ipc';
 
 interface QuitSession { requestId: string; purpose: 'quit' | 'installUpdate'; accepted: boolean }
-interface CloseAttempt { cancelled: boolean; result: Promise<boolean> }
+interface CloseAttempt { cancelled: boolean; controller: AbortController; result: Promise<boolean> }
 let lifecycleReady: Promise<void> | null = null;
 let nativeClose: Promise<void> | null = null;
 let attempt: CloseAttempt | null = null;
@@ -29,7 +29,8 @@ function freeze(): void {
   }
   frozen = true;
   if (root) root.inert = true;
-  // 命令面板/菜单等浮层位于 #app 外；原生确认对话框由 IPC 打开，不受 body inert 影响。
+  // 命令面板/菜单等浮层位于 #app 外；主题确认用 showModal() 进入顶层，
+  // 可在祖先 body inert 时交互，编辑器与其他浮层仍保持冻结。
   if (document.body) document.body.inert = true;
   setCommandExecutionBlocked(true);
   setTransferClosing(true);
@@ -49,10 +50,11 @@ function reportCloseError(error: unknown, purpose: QuitSession['purpose'] = 'qui
   alert(t(purpose === 'installUpdate' ? 'window.installSettingsFailed' : 'window.closeFailed', { error: errorMessage(error) }));
 }
 
-function prepareClose(purpose: QuitSession['purpose'] = 'quit'): Promise<boolean> {
+function prepareClose(purpose: QuitSession['purpose'] = 'quit', requested: () => boolean = () => true): Promise<boolean> {
+  if (!requested()) return Promise.resolve(false);
   if (attempt && !attempt.cancelled) return attempt.result;
-  if (attempt) return attempt.result.then(() => prepareClose(purpose));
-  const current: CloseAttempt = { cancelled: false, result: Promise.resolve(false) };
+  if (attempt) return attempt.result.then(() => prepareClose(purpose, requested));
+  const current: CloseAttempt = { cancelled: false, controller: new AbortController(), result: Promise.resolve(false) };
   attempt = current;
   current.result = (async () => {
     try {
@@ -64,13 +66,14 @@ function prepareClose(purpose: QuitSession['purpose'] = 'quit'): Promise<boolean
       if (dirty.length) {
         const names = dirty.slice(0, 5).map((tab) => t('common.quoted', { name: baseName(tab.doc.path) })).join(t('common.listSep'));
         const more = dirty.length > 5 ? t('window.quitDirtyMore', { count: dirty.length }) : '';
-        if (!(await ipc.confirm(t(purpose === 'installUpdate' ? 'window.installDirtyConfirm' : 'window.quitDirtyConfirm', { names, more })))) return false;
+        if (!(await ipc.confirm(t(purpose === 'installUpdate' ? 'window.installDirtyConfirm' : 'window.quitDirtyConfirm', { names, more }),
+          undefined, { signal: current.controller.signal }))) return false;
       }
       if (current.cancelled) return false;
       await flushSettings();
       return !current.cancelled;
     } catch (error) {
-      reportCloseError(error, purpose);
+      if (!current.cancelled) reportCloseError(error, purpose);
       return false;
     }
   })().finally(() => { if (attempt === current) attempt = null; });
@@ -93,7 +96,7 @@ async function voteForQuit({ requestId, purpose = 'quit' }: QuitRequest): Promis
   const session: QuitSession = { requestId, purpose, accepted: false };
   quitSession = session;
   freeze();
-  const allowed = await prepareClose(purpose);
+  const allowed = await prepareClose(purpose, () => quitSession === session && !destroyed);
   if (quitSession !== session || destroyed) return;
   // 事件可能先于 reply promise 返回，必须在投票前记录本窗口已经同意。
   session.accepted = allowed;
@@ -134,7 +137,10 @@ export function windowLifecycleReady(): Promise<void> {
     ipc.onQuitCancelled(({ requestId }) => {
       if (quitSession?.requestId !== requestId) return;
       quitSession = null;
-      if (attempt && !nativeClose) attempt.cancelled = true;
+      if (attempt && !nativeClose) {
+        attempt.cancelled = true;
+        attempt.controller.abort();
+      }
       release();
     }),
   ]).then(() => {});

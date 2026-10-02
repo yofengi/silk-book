@@ -56,7 +56,7 @@ function pickFiles(multiple: boolean, accept: string): Promise<File[]> {
   });
 }
 
-export const mockIpc: IpcApi = {
+export const mockIpc: Omit<IpcApi, 'confirm'> = {
   updateInfo: async () => ({ currentVersion: '0.1.0', platform: 'Browser preview', repositoryUrl: 'https://github.com/yofengi/silk-book', transfer: idleUpdateTransfer() }),
   async checkUpdates() { throw err('unsupported', 'update checking requires the desktop application'); },
   async onUpdatesChecked() { /* 浏览器无后端共享更新事件 */ },
@@ -150,9 +150,6 @@ export const mockIpc: IpcApi = {
     return name ? `mock://${name}` : null;
   },
 
-  async confirm(message) {
-    return window.confirm(message);
-  },
 
   async allowAssetDir() { /* 浏览器无 asset 协议 */ },
   assetUrl: () => null,

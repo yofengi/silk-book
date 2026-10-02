@@ -16,6 +16,7 @@ function load(file, imports, globals = {}) {
     module, exports: module.exports,
     require: (name) => name in imports ? imports[name] : require(name),
     console, setTimeout, clearTimeout, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, DataView,
+    AbortController: globalThis.AbortController,
     ...globals,
   }, { filename: file });
   return module.exports;

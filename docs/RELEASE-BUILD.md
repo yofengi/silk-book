@@ -69,7 +69,11 @@ The check requires a visible Windows desktop. A DOM toolbar alone is insufficien
 
 This local test verifies real download progress, shared tasks across two windows, one completion popup, and restart cache restoration. `--resume-ready` reuses a previously verified package without another download. It never requests installation and blocks installation-button clicks in its visible test windows. Tauri's native IPC functions are non-writable, so assigning an `invoke` wrapper does not safely intercept installation or native dialogs. All-window cancellation is covered by the Rust and frontend lifecycle regressions; actual installation is reserved for the disposable CI runner below.
 
-The Windows CI job additionally runs `scripts/qa-windows-installer.ps1` on its disposable runner. It verifies silent first install, the updater's `/S /UPDATE /R` path, restart, and settings/document preservation. The script refuses to run outside GitHub Actions because NSIS writes product registrations even when a temporary destination is supplied.
+The Windows CI job additionally runs `scripts/qa-windows-installer.ps1` on its disposable runner. It verifies silent first install, the updater's `/S /UPDATE /R` path, restart, settings/document preservation, and remembered associations across reinstall. It downloads the published 0.2.0 installer with a pinned SHA256 to test migration from an executable that predates saved association choices. The script refuses to run outside GitHub Actions because NSIS writes product registrations even when a temporary destination is supplied.
+
+The data-deletion check invokes the fixed-path maintenance CLI directly; it does not automate clicking the NSIS Delete app data checkbox. Missing executable files or failed preference maintenance abort uninstall and ask the user to repair the installation first.
+
+`scripts/qa-themed-confirm-native.mjs` uses a separately built 0.2.1 client with the `com.boshu.editor.dialog-qa` identifier, an artifact cache override, and a caller-supplied reviewed `QA_EXPECTED_SHA256`. It verifies themed confirmation dialogs, keyboard cancellation, and two-window quit cancellation while the editors are inert. Its native-command allowlist contains no update or installation commands; it controls only its own verified windows and process. `--preflight-only` validates the configuration without launching an application.
 
 ## macOS configuration
 

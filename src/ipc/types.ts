@@ -119,6 +119,11 @@ export interface UpdateTransferState {
 /** 仅发送给一个窗口；广播或缓存快照不会自动打开完成弹窗。 */
 export interface UpdateReady { taskId: string; revision: number }
 
+export interface ConfirmOptions {
+  /** 取消活动或排队的应用内确认；始终返回 false，不抛中断错误。 */
+  signal?: AbortSignal;
+}
+
 export interface IpcApi {
   updateInfo(): Promise<UpdateInfo>;
   /** 后端跨窗口去重并记录检查时间；未到期且无会话缓存时返回 null。 */
@@ -150,7 +155,7 @@ export interface IpcApi {
   settingsSave(json: string): Promise<void>;
   openDialog(opts?: { multiple?: boolean; filters?: FileFilter[] }): Promise<string[]>;
   saveDialog(opts?: { defaultPath?: string; filters?: FileFilter[] }): Promise<string | null>;
-  confirm(message: string, title?: string): Promise<boolean>;
+  confirm(message: string, title?: string, options?: ConfirmOptions): Promise<boolean>;
   /** 为已打开文档所在目录授予 asset 协议访问（path 为文档文件本身） */
   allowAssetDir(documentPath: string): Promise<void>;
   /** 本地绝对路径 -> 可用于 <img src> 的 asset URL；mock 返回 null */

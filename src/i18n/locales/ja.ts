@@ -4,6 +4,8 @@ import type { LocaleMessages } from '../types';
 
 const ja: LocaleMessages = {
   common: {
+    confirm: '確認',
+    confirmTitle: '操作の確認',
     cancel: 'キャンセル',
     close: '閉じる',
     delete: '削除',

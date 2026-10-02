@@ -2,8 +2,10 @@
 import { mockIpc } from './mock';
 import { tauriIpc } from './tauri';
 import type { IpcApi } from './types';
+import { confirmDialog } from '../ui/confirm-dialog';
 
 const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-export const ipc: IpcApi = inTauri ? tauriIpc : mockIpc;
+// 文件选择仍由各平台实现；所有确认共用前端主题、队列和中断语义。
+export const ipc: IpcApi = { ...(inTauri ? tauriIpc : mockIpc), confirm: confirmDialog };
 export * from './types';

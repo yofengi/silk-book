@@ -4,8 +4,7 @@ import { Effect, EffectState, Window, cursorPosition, getAllWindows, getCurrentW
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { emitTo } from '@tauri-apps/api/event';
-import { confirm as dlgConfirm, open, save } from '@tauri-apps/plugin-dialog';
-import { productName } from '../i18n';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import {
   validExts, type AnsiEncoding, type BundledFont, type EncodingInfo, type FileAssocStatus, type FileStat, type ImportedTheme, type IpcApi, type ReadDone, type ReadResult,
   type QuitRequest, type SettingsChanged, type SettingsSnapshot, type ThemeEntry, type TransferStatus, type WindowInit, type WriteResult,
@@ -27,7 +26,7 @@ interface Progress {
 }
 type ReadMessage = ArrayBuffer | Progress | ReadDone;
 
-export const tauriIpc: IpcApi = {
+export const tauriIpc: Omit<IpcApi, 'confirm'> = {
   updateInfo: () => invoke<UpdateInfo>('updates_info'),
   checkUpdates: (manual) => invoke<UpdateCheckResult | null>('updates_check', { manual }),
   onUpdatesChecked: (fn) => listenSelf<UpdateCheckResult>('updates-checked', fn),
@@ -93,7 +92,6 @@ export const tauriIpc: IpcApi = {
 
   saveDialog: (opts) => save({ defaultPath: opts?.defaultPath, filters: opts?.filters }),
 
-  confirm: (message, title) => dlgConfirm(message, { title: title ?? productName(), kind: 'warning' }),
 
   allowAssetDir: (path) => invoke<void>('allow_asset_dir', { path }),
   assetUrl: (absPath) => convertFileSrc(absPath),

@@ -15,6 +15,7 @@ function load(file, imports, globals) {
   }).outputText;
   vm.runInNewContext(code, {
     module, exports: module.exports, console, setTimeout, clearTimeout, TextEncoder, TextDecoder,
+    AbortController: globalThis.AbortController,
     require: (name) => name in imports ? imports[name] : require(name), ...globals,
   }, { filename: file });
   return module.exports;
@@ -23,6 +24,7 @@ function load(file, imports, globals) {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 function fixture() {
   const hooks = {}; const calls = []; let approve = true; let text = 'alpha'; let newTabs = 0;
+  let pendingConfirm = false, confirmationSignal;
   let document;
   class Element {
     inert = false; children = []; listeners = new Map();
@@ -47,7 +49,12 @@ function fixture() {
     '../core/settings': settings, '../i18n': { t: (key) => key },
   }, globals);
   const ipc = {
-    confirm: async () => { calls.push('confirm'); return approve; },
+    confirm: async (_message, _title, options) => {
+      calls.push('confirm');
+      confirmationSignal = options?.signal;
+      if (pendingConfirm) return new Promise(resolve => confirmationSignal?.addEventListener('abort', () => resolve(false), { once: true }));
+      return approve;
+    },
     requestQuit: async () => {}, replyQuit: async (id, allow) => calls.push(['reply', id, allow]),
     onQuitRequested: async (fn) => { hooks.quit = fn; },
     onQuitApproved: async (fn) => { hooks.approved = fn; },
@@ -83,6 +90,7 @@ function fixture() {
   return {
     hooks, calls, root, body, commands, palette, lifecycle, key,
     text: () => text, newTabs: () => newTabs, setApprove: (value) => { approve = value; },
+    waitForConfirmation: () => { pendingConfirm = true; }, confirmationSignal: () => confirmationSignal,
   };
 }
 
@@ -135,7 +143,7 @@ await check('cancelled quit restores commands, hotkeys and body interaction', as
   await f.commands.executeCommand('editor.replaceNext'); assert.equal(f.text(), 'beta');
   f.key('n', { ctrlKey: true }); await tick(); assert.equal(f.newTabs(), 1);
 });
-await check('native confirmation remains callable while commands are frozen', async () => {
+await check('modal confirmation remains callable while commands are frozen', async () => {
   const f = fixture(); await accepted(f);
   assert.equal(f.calls.filter((call) => call === 'confirm').length, 1);
   assert.equal(f.commands.isEnabled('file.new'), false);
@@ -145,6 +153,22 @@ await check('cancelled native close releases the command gate', async () => {
   f.hooks.close({ preventDefault() {} }); await tick();
   assert.equal(f.root.inert, false); assert.equal(f.body.inert, false);
   await f.commands.executeCommand('file.new'); assert.equal(f.newTabs(), 1);
+  assert.equal(f.calls.includes('destroy'), false);
+});
+await check('cancelling a pending installation modal releases the actual body and command gate', async () => {
+  const f = fixture(); f.waitForConfirmation(); await f.lifecycle.windowLifecycleReady();
+  f.hooks.quit({ requestId: 'pending-install', purpose: 'installUpdate' });
+  await tick();
+  assert.equal(f.body.inert, true); assert.equal(f.root.inert, true);
+  assert.equal(f.commands.isEnabled('editor.replaceNext'), false);
+  assert.ok(f.confirmationSignal());
+  f.hooks.cancelled({ requestId: 'pending-install' });
+  assert.equal(f.confirmationSignal().aborted, true);
+  assert.equal(f.body.inert, false); assert.equal(f.root.inert, false);
+  await f.commands.executeCommand('editor.replaceNext');
+  await tick();
+  assert.equal(f.text(), 'beta');
+  assert.equal(f.calls.some(call => Array.isArray(call) && call[0] === 'reply'), false);
   assert.equal(f.calls.includes('destroy'), false);
 });
 if (failures.length) process.exitCode = 1;

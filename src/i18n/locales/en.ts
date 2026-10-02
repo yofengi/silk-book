@@ -4,6 +4,8 @@ import type { LocaleMessages } from '../types';
 
 const en: LocaleMessages = {
   common: {
+    confirm: 'Confirm',
+    confirmTitle: 'Confirm action',
     cancel: 'Cancel',
     close: 'Close',
     delete: 'Delete',

@@ -4,6 +4,8 @@ import type { LocaleMessages } from '../types';
 
 const zhTW: LocaleMessages = {
   common: {
+    confirm: '確認',
+    confirmTitle: '確認操作',
     cancel: '取消',
     close: '關閉',
     delete: '刪除',

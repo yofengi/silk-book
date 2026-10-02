@@ -1,4 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use crate::error::{AppError, Result};
 
@@ -8,6 +12,117 @@ const ASSOCIATIONS: &str = r"Software\Boshu\Capabilities\FileAssociations";
 const REGISTERED_APPS: &str = r"Software\RegisteredApplications";
 const APP_PATH: &str = r"Software\Classes\Applications\boshu.exe";
 const LEGACY_PROG_IDS: &[&str] = &["Boshu.File", "Boshu.Code", "Boshu.Text"];
+static CHOICE_LOCK: Mutex<()> = Mutex::new(());
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedChoices {
+    version: u32,
+    extensions: Vec<String>,
+}
+
+fn choices_path() -> Result<PathBuf> {
+    Ok(crate::settings::app_config_dir()?.join("associations.json"))
+}
+
+// The 0.2.0 uninstaller removes this directory only when deleting user data.
+// Stage its registry snapshot here before running that older uninstaller.
+fn migration_path() -> Result<PathBuf> {
+    let appdata = std::env::var_os("APPDATA")
+        .ok_or_else(|| AppError::InvalidArgument("APPDATA is not set".into()))?;
+    Ok(PathBuf::from(appdata)
+        .join("com.boshu.editor")
+        .join("associations-migration.json"))
+}
+
+fn normalize(mut exts: Vec<String>) -> Vec<String> {
+    exts.sort();
+    exts.dedup();
+    exts
+}
+
+fn owned_selection(
+    ext: &str,
+    id: &str,
+    command: Option<&str>,
+    expected: &str,
+    open_with: bool,
+) -> bool {
+    validate_exts(&[ext.into()]).is_ok()
+        && (id == prog_id(ext) || is_legacy_prog_id(id))
+        && command == Some(expected)
+        && open_with
+}
+
+fn load_choices(path: &Path) -> Result<Option<Vec<String>>> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let saved: SavedChoices = serde_json::from_slice(&bytes)?;
+    if saved.version != 1 {
+        return Err(AppError::InvalidArgument(
+            "unsupported file association preferences".into(),
+        ));
+    }
+    validate_exts(&saved.extensions)?;
+    Ok(Some(normalize(saved.extensions)))
+}
+
+fn save_choices(path: &Path, exts: &[String]) -> Result<()> {
+    validate_exts(exts)?;
+    let saved = SavedChoices {
+        version: 1,
+        extensions: normalize(exts.to_vec()),
+    };
+    let parent = path
+        .parent()
+        .ok_or_else(|| AppError::InvalidArgument("invalid association preferences path".into()))?;
+    std::fs::create_dir_all(parent)?;
+    crate::fs::write::atomic_write(path, &serde_json::to_vec_pretty(&saved)?)
+}
+
+fn updated_choices(mut previous: Vec<String>, exts: &[String], registering: bool) -> Vec<String> {
+    if registering {
+        previous.extend_from_slice(exts);
+    } else {
+        previous.retain(|ext| !exts.contains(ext));
+    }
+    normalize(previous)
+}
+
+fn import_choices(current: &Path, migration: &Path) -> Result<Option<Vec<String>>> {
+    let current_choices = load_choices(current)?;
+    let choices = match current_choices {
+        Some(exts) => Some(exts),
+        None => {
+            let migrated = load_choices(migration)?;
+            if let Some(exts) = &migrated {
+                save_choices(current, exts)?;
+            }
+            migrated
+        }
+    };
+    clear_migration(migration)?;
+    Ok(choices)
+}
+
+fn clear_migration(migration: &Path) -> Result<()> {
+    match std::fs::remove_file(migration) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
+    }
+    Ok(())
+}
+
+fn refresh_migration(path: &Path, choices: Option<&[String]>) -> Result<()> {
+    match choices {
+        Some(exts) => save_choices(path, exts),
+        None => clear_migration(path),
+    }
+}
 const CODE_EXTENSIONS: &[&str] = &[
     "js", "ts", "jsx", "tsx", "json", "py", "rs", "c", "h", "cpp", "hpp", "java", "go", "html",
     "css", "xml", "yaml", "yml", "sql", "toml", "sh", "bat", "ps1", "lua",
@@ -24,6 +139,11 @@ pub enum CliAssociationCommand {
     Register(Vec<String>),
     Unregister(Vec<String>),
     UnregisterAll,
+    Cleanup,
+    Backup,
+    Restore,
+    Replace(Vec<String>),
+    DeleteData,
 }
 
 #[derive(Serialize)]
@@ -69,6 +189,28 @@ fn parse_ext_arg(value: Option<&String>) -> Result<Vec<String>> {
 pub fn parse_cli_args(args: &[String]) -> Option<Result<CliAssociationCommand>> {
     let operation = args.get(1)?.as_str();
     let parsed = match operation {
+        "--cleanup-assoc" | "--backup-assoc" | "--restore-assoc" | "--delete-assoc-data"
+            if args.len() == 2 =>
+        {
+            Ok(match operation {
+                "--cleanup-assoc" => CliAssociationCommand::Cleanup,
+                "--backup-assoc" => CliAssociationCommand::Backup,
+                "--restore-assoc" => CliAssociationCommand::Restore,
+                _ => CliAssociationCommand::DeleteData,
+            })
+        }
+        "--cleanup-assoc" | "--backup-assoc" | "--restore-assoc" | "--delete-assoc-data" => Err(
+            AppError::InvalidArgument("association maintenance command takes no arguments".into()),
+        ),
+        "--replace-assoc" if args.len() == 3 && args[2] == "none" => {
+            Ok(CliAssociationCommand::Replace(Vec::new()))
+        }
+        "--replace-assoc" if args.len() == 3 => {
+            parse_ext_arg(args.get(2)).map(CliAssociationCommand::Replace)
+        }
+        "--replace-assoc" => Err(AppError::InvalidArgument(
+            "--replace-assoc expects an extension list or none".into(),
+        )),
         "--register-assoc" => {
             if args.len() != 3 {
                 Err(AppError::InvalidArgument(
@@ -355,6 +497,37 @@ mod registry {
         format!("\"{}\" \"%1\"", exe.display())
     }
 
+    /// Capture only Boshu registrations whose command belongs to the registered
+    /// installed executable, even when this code runs from an installer helper.
+    pub fn selected() -> Result<Option<Vec<String>>> {
+        let Some(expected) = get(&format!(r"{APP_PATH}\shell\open\command"), "")? else {
+            return Ok(None);
+        };
+        let mut exts = Vec::new();
+        let mut names = enum_values(ASSOCIATIONS)?;
+        names.extend(enum_values(&format!(r"{APP_PATH}\SupportedTypes"))?);
+        for name in names {
+            let Some(ext) = name.strip_prefix('.') else {
+                continue;
+            };
+            if validate_exts(&[ext.into()]).is_err() {
+                continue;
+            }
+            let id = get(ASSOCIATIONS, &name)?.unwrap_or_else(|| prog_id(ext));
+            let actual = get(&format!(r"{CLASSES}\{id}\shell\open\command"), "")?;
+            if owned_selection(
+                ext,
+                &id,
+                actual.as_deref(),
+                &expected,
+                exists(&ext_key(ext), &id)?,
+            ) {
+                exts.push(ext.into());
+            }
+        }
+        Ok(Some(normalize(exts)))
+    }
+
     pub fn status(exts: Vec<String>) -> Result<Vec<AssociationStatus>> {
         validate_exts(&exts)?;
         let exe = std::env::current_exe()?;
@@ -428,12 +601,18 @@ mod registry {
     }
 
     pub fn unregister(exts: Vec<String>) -> Result<()> {
-        validate_exts(&exts)?;
         let exe = std::env::current_exe()?;
+        unregister_owned(exts, &command(&exe))
+    }
+
+    fn unregister_owned(exts: Vec<String>, expected_command: &str) -> Result<()> {
+        validate_exts(&exts)?;
         for ext in exts {
             let extension = format!(".{ext}");
             let id = get(ASSOCIATIONS, &extension)?.unwrap_or_else(|| prog_id(&ext));
-            if !association_is_owned(&id, &exe)? {
+            if get(&format!(r"{CLASSES}\{id}\shell\open\command"), "")?.as_deref()
+                != Some(expected_command)
+            {
                 continue;
             }
 
@@ -448,6 +627,20 @@ mod registry {
         }
         notify();
         Ok(())
+    }
+
+    pub fn restore_selected(exts: Vec<String>) -> Result<()> {
+        // Reconcile the saved set before changing APP_PATH to the new location.
+        // This also respects explicit empty choices after an interrupted remove.
+        if let Some(expected) = get(&format!(r"{APP_PATH}\shell\open\command"), "")? {
+            let obsolete = selected()?
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|ext| !exts.contains(ext))
+                .collect();
+            unregister_owned(obsolete, &expected)?;
+        }
+        register(exts)
     }
 
     pub fn unregister_all() -> Result<()> {
@@ -519,6 +712,18 @@ mod registry {
 mod registry {
     use super::*;
 
+    pub fn selected() -> Result<Option<Vec<String>>> {
+        Err(AppError::InvalidArgument(
+            "file associations are supported on Windows only".into(),
+        ))
+    }
+
+    pub fn restore_selected(_: Vec<String>) -> Result<()> {
+        Err(AppError::InvalidArgument(
+            "file associations are supported on Windows only".into(),
+        ))
+    }
+
     pub fn status(_: Vec<String>) -> Result<Vec<AssociationStatus>> {
         Err(AppError::InvalidArgument(
             "file associations are supported on Windows only".into(),
@@ -550,15 +755,242 @@ mod registry {
     }
 }
 
-#[cfg(windows)]
-pub use registry::{open_settings, register, status, unregister, unregister_all};
+pub use registry::{open_settings, status};
 
-#[cfg(not(windows))]
-pub use registry::{open_settings, register, status, unregister, unregister_all};
+fn with_choices(operation: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
+    let _guard = CHOICE_LOCK
+        .lock()
+        .map_err(|_| AppError::InvalidArgument("association preferences lock poisoned".into()))?;
+    operation(&choices_path()?)
+}
+
+fn previous_choices(path: &Path) -> Result<Vec<String>> {
+    match load_choices(path)? {
+        Some(exts) => Ok(exts),
+        None => Ok(registry::selected()?.unwrap_or_default()),
+    }
+}
+
+pub fn register(exts: Vec<String>) -> Result<()> {
+    validate_exts(&exts)?;
+    with_choices(|path| {
+        let selected = updated_choices(previous_choices(path)?, &exts, true);
+        save_choices(path, &selected)?;
+        registry::register(exts)
+    })
+}
+
+pub fn unregister(exts: Vec<String>) -> Result<()> {
+    validate_exts(&exts)?;
+    with_choices(|path| {
+        let selected = updated_choices(previous_choices(path)?, &exts, false);
+        save_choices(path, &selected)?;
+        registry::unregister(exts)
+    })
+}
+
+pub fn unregister_all() -> Result<()> {
+    replace(Vec::new())
+}
+
+/// Installer selection replaces, rather than adds to, the saved user choices.
+pub fn replace(exts: Vec<String>) -> Result<()> {
+    validate_exts(&exts)?;
+    with_choices(|path| {
+        save_choices(path, &exts)?;
+        registry::unregister_all()?;
+        registry::register(exts)
+    })
+}
+
+/// Uninstall removes invalid system registrations but retains user preferences.
+pub fn cleanup() -> Result<()> {
+    with_choices(|path| {
+        if load_choices(path)?.is_none() {
+            if let Some(exts) = registry::selected()? {
+                save_choices(path, &exts)?;
+            }
+        }
+        registry::unregister_all()
+    })
+}
+
+/// Incoming installers snapshot older builds before overwriting/uninstalling.
+pub fn backup() -> Result<()> {
+    with_choices(|path| {
+        let choices = if load_choices(path)?.is_none() {
+            registry::selected()?
+        } else {
+            None
+        };
+        // Each installer invocation supersedes a cancelled installer snapshot.
+        // Explicitly clearing old registrations must never resurrect stale types.
+        refresh_migration(&migration_path()?, choices.as_deref())
+    })
+}
+
+pub fn restore() -> Result<()> {
+    with_choices(|path| {
+        let choices = import_choices(path, &migration_path()?)?;
+        let choices = match choices {
+            Some(exts) => Some(exts),
+            None => {
+                let previous = registry::selected()?;
+                if let Some(exts) = &previous {
+                    save_choices(path, exts)?;
+                }
+                previous
+            }
+        };
+        if let Some(exts) = choices {
+            registry::restore_selected(exts)?;
+        }
+        Ok(())
+    })
+}
+
+/// Only the uninstaller's explicit Delete app data option invokes this command.
+/// No caller-supplied path; Rust removes junctions/symlinks without following them.
+pub fn delete_data() -> Result<()> {
+    with_choices(|path| {
+        let choices = load_choices(path)?;
+        let directory = path
+            .parent()
+            .ok_or_else(|| AppError::InvalidArgument("invalid app data directory".into()))?;
+        let result = delete_data_directory(directory);
+        if result.is_err() {
+            // Directory removal can partially succeed. Keep the selection
+            // available to a surviving executable if uninstall is aborted.
+            if let Some(exts) = choices {
+                let _ = save_choices(path, &exts);
+                let _ = registry::register(exts);
+            }
+        }
+        result
+    })
+}
+
+fn delete_data_directory(directory: &Path) -> Result<()> {
+    match std::fs::remove_dir_all(directory) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err.into()),
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_migration_accepts_only_owned_boshu_extensions() {
+        let old = r#""C:\old\boshu.exe" "%1""#;
+        assert!(owned_selection("txt", "Boshu.txt", Some(old), old, true));
+        assert!(owned_selection("lua", "Boshu.Code", Some(old), old, true));
+        assert!(!owned_selection("txt", "Other.Text", Some(old), old, true));
+        assert!(!owned_selection(
+            "txt",
+            "Boshu.txt",
+            Some(r#""C:\other\boshu.exe" "%1""#),
+            old,
+            true
+        ));
+        assert!(!owned_selection("txt", "Boshu.txt", Some(old), old, false));
+        assert!(!owned_selection(
+            "../txt",
+            "Boshu.Text",
+            Some(old),
+            old,
+            true
+        ));
+    }
+
+    #[test]
+    fn explicit_data_removal_deletes_preferences_without_touching_siblings() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("Boshu");
+        let sibling = dir.path().join("user-document.txt");
+        std::fs::write(&sibling, "keep").unwrap();
+        save_choices(&data.join("associations.json"), &["txt".into()]).unwrap();
+        std::fs::write(data.join("settings.json"), "{}").unwrap();
+        delete_data_directory(&data).unwrap();
+        assert!(!data.exists());
+        assert_eq!(std::fs::read_to_string(sibling).unwrap(), "keep");
+        delete_data_directory(&data).unwrap();
+    }
+
+    #[test]
+    fn saved_choices_distinguish_missing_from_explicit_empty_and_validate() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("associations.json");
+        assert_eq!(load_choices(&path).unwrap(), None);
+        save_choices(&path, &[]).unwrap();
+        assert_eq!(load_choices(&path).unwrap(), Some(Vec::new()));
+        save_choices(&path, &["txt".into(), "lua".into(), "txt".into()]).unwrap();
+        assert_eq!(
+            load_choices(&path).unwrap(),
+            Some(vec!["lua".into(), "txt".into()])
+        );
+        std::fs::write(&path, r#"{"version":1,"extensions":["../txt"]}"#).unwrap();
+        assert!(load_choices(&path).is_err());
+        std::fs::write(&path, r#"{"version":2,"extensions":[]}"#).unwrap();
+        assert!(load_choices(&path).is_err());
+    }
+
+    #[test]
+    fn registering_and_removing_choices_preserves_other_extensions() {
+        let previous = vec!["txt".into(), "lua".into()];
+        assert_eq!(
+            updated_choices(previous.clone(), &["md".into(), "txt".into()], true),
+            vec!["lua", "md", "txt"]
+        );
+        assert_eq!(
+            updated_choices(previous.clone(), &["lua".into()], false),
+            vec!["txt"]
+        );
+        assert_eq!(
+            updated_choices(previous, &["txt".into(), "lua".into()], false),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn old_installation_snapshot_is_only_imported_without_current_choices() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("current/associations.json");
+        let migration = dir.path().join("legacy/migration.json");
+        save_choices(&migration, &["lua".into(), "txt".into()]).unwrap();
+        assert_eq!(
+            import_choices(&current, &migration).unwrap(),
+            Some(vec!["lua".into(), "txt".into()])
+        );
+        assert!(!migration.exists());
+        save_choices(&current, &[]).unwrap();
+        save_choices(&migration, &["md".into()]).unwrap();
+        assert_eq!(
+            import_choices(&current, &migration).unwrap(),
+            Some(Vec::new())
+        );
+        assert!(!migration.exists());
+        std::fs::remove_file(&current).unwrap();
+        assert_eq!(import_choices(&current, &migration).unwrap(), None);
+    }
+
+    #[test]
+    fn cancelled_installer_snapshot_cannot_resurrect_removed_choices() {
+        let dir = tempfile::tempdir().unwrap();
+        let migration = dir.path().join("migration.json");
+        let current = dir.path().join("associations.json");
+        refresh_migration(&migration, Some(&["txt".into()])).unwrap();
+        // The old app subsequently unregisters all before the next installer.
+        refresh_migration(&migration, None).unwrap();
+        assert_eq!(import_choices(&current, &migration).unwrap(), None);
+        refresh_migration(&migration, Some(&[])).unwrap();
+        assert_eq!(
+            import_choices(&current, &migration).unwrap(),
+            Some(Vec::new())
+        );
+    }
 
     #[test]
     fn extension_icon_and_prog_id_mapping_is_stable() {
@@ -626,5 +1058,27 @@ mod tests {
                 .is_err()
         );
         assert!(parse_cli_args(&args(&["boshu.exe", "--unknown"])).is_none());
+        assert_eq!(
+            parse_cli_args(&args(&["boshu.exe", "--replace-assoc", "none"]))
+                .unwrap()
+                .unwrap(),
+            CliAssociationCommand::Replace(Vec::new())
+        );
+        for (flag, expected) in [
+            ("--backup-assoc", CliAssociationCommand::Backup),
+            ("--restore-assoc", CliAssociationCommand::Restore),
+            ("--cleanup-assoc", CliAssociationCommand::Cleanup),
+            ("--delete-assoc-data", CliAssociationCommand::DeleteData),
+        ] {
+            assert_eq!(
+                parse_cli_args(&args(&["boshu.exe", flag]))
+                    .unwrap()
+                    .unwrap(),
+                expected
+            );
+            assert!(parse_cli_args(&args(&["boshu.exe", flag, "C:\\untrusted"]))
+                .unwrap()
+                .is_err());
+        }
     }
 }

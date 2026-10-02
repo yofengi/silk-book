@@ -27,6 +27,11 @@ pub fn run() {
             Ok(associations::CliAssociationCommand::UnregisterAll) => {
                 associations::unregister_all()
             }
+            Ok(associations::CliAssociationCommand::Cleanup) => associations::cleanup(),
+            Ok(associations::CliAssociationCommand::Backup) => associations::backup(),
+            Ok(associations::CliAssociationCommand::Restore) => associations::restore(),
+            Ok(associations::CliAssociationCommand::Replace(exts)) => associations::replace(exts),
+            Ok(associations::CliAssociationCommand::DeleteData) => associations::delete_data(),
             Err(error) => Err(error),
         };
         if let Err(error) = result {

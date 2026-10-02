@@ -1,0 +1,33 @@
+.confirm-dialog {
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: 24px;
+  color: var(--fg);
+  background: var(--editor-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  font-family: var(--ui-font);
+  font-size: var(--ui-font-size);
+  overflow: auto;
+}
+.confirm-dialog::backdrop { background: var(--overlay); }
+.confirm-dialog-title { margin: 0 0 14px; font: inherit; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.confirm-dialog-message { margin: 0 0 22px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; max-height: min(50vh, 360px); overflow: auto; user-select: text; }
+.confirm-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.confirm-dialog-actions button { min-width: 78px; padding: 7px 16px; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: var(--hover); color: var(--fg); cursor: pointer; }
+.confirm-dialog-actions button:hover { background: var(--pressed); }
+.confirm-dialog-actions .confirm-dialog-accept { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.confirm-dialog-actions .confirm-dialog-accept:hover { filter: brightness(1.08); }
+.confirm-dialog-actions button:focus-visible, .confirm-dialog-message:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+:root[data-glass] .confirm-dialog { background: var(--float-sheen), var(--float-bg); border-color: var(--float-border); box-shadow: var(--float-shadow); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); }
+.confirm-dialog-overlay { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; padding: 16px; box-sizing: border-box; background: var(--overlay); }
+.confirm-dialog-overlay .confirm-dialog { margin: 0; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-glass] .confirm-dialog { background: var(--float-sheen), var(--inactive-surface); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-glass] .confirm-dialog { background: var(--float-sheen), var(--inactive-surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

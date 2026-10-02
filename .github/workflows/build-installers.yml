@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           pnpm lint
           node scripts/check-i18n.mjs
-          node --experimental-vm-modules --test scripts/a1-regression.test.mjs scripts/test-updates.mjs scripts/test-update-download.mjs scripts/test-window-file-drain.mjs
+          node --experimental-vm-modules --test scripts/a1-regression.test.mjs scripts/test-updates.mjs scripts/test-update-download.mjs scripts/test-window-file-drain.mjs scripts/test-confirm-dialog.mjs
           node scripts/test-window-flows.mjs
           node scripts/test-command-freeze.mjs
           node scripts/test-startup.mjs
@@ -81,7 +81,10 @@ jobs:
         run: |
           $installer = @(Get-ChildItem -LiteralPath 'src-tauri/target/${{ matrix.target }}/release/bundle/nsis' -Filter '*.exe')
           if ($installer.Count -ne 1) { throw 'Expected exactly one installer' }
-          ./scripts/qa-windows-installer.ps1 -Installer $installer[0].FullName
+          $previousInstaller = Join-Path $env:RUNNER_TEMP 'silk-book-0.2.0-windows-x64-setup.exe'
+          Invoke-WebRequest -Uri 'https://github.com/yofengi/silk-book/releases/download/v0.2.0/silk-book-0.2.0-windows-x64-setup.exe' -OutFile $previousInstaller -TimeoutSec 120
+          if ((Get-FileHash -LiteralPath $previousInstaller -Algorithm SHA256).Hash -ne '7A5B4B8991F3E1C99691E49B8ED697FC22F658E06EC3CEBF51D6AECFF5D3563D') { throw 'Previous installer checksum mismatch' }
+          ./scripts/qa-windows-installer.ps1 -Installer $installer[0].FullName -PreviousInstaller $previousInstaller
       - name: Verify packaged macOS app and smoke-test startup
         if: runner.os == 'macOS'
         run: |

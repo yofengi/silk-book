@@ -344,7 +344,7 @@ test('a hover-opened menu stays open once the user starts keyboard navigation', 
   assert.equal(h.menu(), menu);
 });
 
-async function windowHarness({ cancelTransfers = async () => {}, confirm = async () => true } = {}) {
+async function windowHarness({ cancelTransfers = async () => {}, drainFiles = async () => true, confirm = async () => true } = {}) {
   const hooks = {};
   const calls = [];
   const root = { inert: false };
@@ -358,7 +358,7 @@ async function windowHarness({ cancelTransfers = async () => {}, confirm = async
     },
     '../core/settings': { flushSettings: async () => { calls.push('flush'); } },
     '../editor/document': { baseName: () => 'draft' },
-    '../editor/files': { drainFileOperations: async () => true },
+    '../editor/files': { drainFileOperations: drainFiles },
     '../editor/tabs': { listTabs: () => tabs },
     '../editor/transfer': {
       cancelOutgoingTransfers: () => cancelTransfers(tabs),
@@ -366,7 +366,7 @@ async function windowHarness({ cancelTransfers = async () => {}, confirm = async
     },
     '../i18n': { t: (key) => key },
     '../ipc': { errorMessage: (error) => error.message, ipc: {
-      confirm: () => { calls.push('confirm'); return confirm(); },
+      confirm: (...args) => { calls.push('confirm'); return confirm(...args); },
       requestQuit() {},
       replyQuit: async (id, allow) => { calls.push(['vote', id, allow]); },
       onQuitRequested: async (fn) => { hooks.quit = fn; },
@@ -377,7 +377,7 @@ async function windowHarness({ cancelTransfers = async () => {}, confirm = async
         destroy: async () => { calls.push('destroy'); },
       },
     } },
-  }, { document: { getElementById: () => root }, alert: (message) => { calls.push(['alert', message]); } });
+  }, { AbortController: globalThis.AbortController, document: { getElementById: () => root }, alert: (message) => { calls.push(['alert', message]); } });
   module.registerWindowCommands();
   await module.windowLifecycleReady();
   return { hooks, calls, tabs, root };
@@ -450,4 +450,74 @@ test('a local close racing an app quit shares one confirmation and waits for all
   h.hooks.approved({ requestId: 'q1' });
   await settle();
   assert.equal(h.calls.filter((call) => call === 'destroy').length, 1);
+});
+
+test('a cancelled installation immediately aborts its pending confirmation and later retries use a fresh signal', async () => {
+  const pending = [];
+  const h = await windowHarness({ confirm: (_message, _title, options) => new Promise((resolve) => {
+    const signal = options?.signal;
+    pending.push({ signal, resolve });
+    signal?.addEventListener('abort', () => resolve(false), { once: true });
+  }) });
+  h.tabs.push({ doc: { path: null, dirty: true } });
+  h.hooks.quit({ requestId: 'install-old', purpose: 'installUpdate' });
+  await settle();
+  assert.ok(pending[0]?.signal, 'the lifecycle must provide an abortable confirmation');
+  h.hooks.cancelled({ requestId: 'install-old' });
+  assert.equal(pending[0].signal.aborted, true, 'another window cancellation closes the dialog immediately');
+  assert.equal(h.root.inert, false);
+  await settle();
+  assert.equal(h.calls.some(call => Array.isArray(call) && (call[0] === 'vote' || call[0] === 'alert')), false);
+  h.hooks.quit({ requestId: 'install-new', purpose: 'installUpdate' });
+  await settle();
+  assert.equal(pending.length, 2, 'retry must not wait for an answer to the stale dialog');
+  assert.equal(pending[1].signal.aborted, false);
+  assert.notEqual(pending[0].signal, pending[1].signal);
+  pending[0].resolve(true);
+  pending[1].resolve(false);
+  await settle();
+  const votes = h.calls.filter(call => Array.isArray(call) && call[0] === 'vote');
+  assert.equal(votes.length, 1);
+  assert.equal(votes[0][1], 'install-new');
+  assert.equal(votes[0][2], false);
+  assert.equal(h.root.inert, false);
+});
+
+test('cancelling app quit preserves the still-pending confirmation shared with a local close', async () => {
+  let answer, signal;
+  const h = await windowHarness({ confirm: (_message, _title, options) => {
+    signal = options?.signal;
+    return new Promise(resolve => { answer = resolve; });
+  } });
+  h.tabs.push({ doc: { path: null, dirty: true } });
+  h.hooks.close({ preventDefault() {} });
+  await settle();
+  h.hooks.quit({ requestId: 'shared-quit' });
+  h.hooks.cancelled({ requestId: 'shared-quit' });
+  assert.ok(signal, 'the original local confirmation must be abortable');
+  assert.equal(signal.aborted, false, 'an independent local close still owns this confirmation');
+  assert.equal(h.root.inert, true);
+  answer(false);
+  await settle();
+  assert.equal(h.calls.filter(call => call === 'confirm').length, 1);
+  assert.equal(h.calls.some(call => Array.isArray(call) && call[0] === 'vote'), false);
+  assert.equal(h.calls.includes('destroy'), false);
+  assert.equal(h.root.inert, false);
+});
+
+test('cancelled quit retries queued behind a slow file drain never reopen an orphan confirmation', async () => {
+  let finishDrain;
+  const h = await windowHarness({ drainFiles: () => new Promise(resolve => { finishDrain = resolve; }) });
+  h.tabs.push({ doc: { path: null, dirty: true } });
+  h.hooks.quit({ requestId: 'draining-old' });
+  await settle();
+  h.hooks.cancelled({ requestId: 'draining-old' });
+  h.hooks.quit({ requestId: 'queued-new', purpose: 'installUpdate' });
+  h.hooks.cancelled({ requestId: 'queued-new' });
+  assert.equal(h.root.inert, false);
+  finishDrain(true);
+  await settle();
+  assert.equal(h.calls.includes('confirm'), false);
+  assert.equal(h.root.inert, false, 'old work completing must not freeze a cancelled session again');
+  assert.equal(h.calls.some(call => Array.isArray(call) && call[0] === 'vote'), false);
 });

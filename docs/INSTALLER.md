@@ -4,8 +4,17 @@ Boshu uses Tauri 2.12's NSIS bundler with a checked-in template at `src-tauri/in
 
 - The installer uses the default Tauri/MUI appearance. There are no custom sidebar or header bitmaps, palette overrides, DWM title-bar calls, or Mica calls.
 - The association page has separate text, Markdown, and code groups. Text and Markdown are checked by default; code is unchecked and includes `lua`. The optional checkbox opens Windows Default Apps settings after registration.
-- Silent (`/S`) and passive (`/P`) installs skip the page and register nothing. The page invokes `boshu.exe --register-assoc ...` only when the user leaves it.
-- Uninstall invokes `boshu.exe --unregister-assoc all` before removing files. `src-tauri/nsis-hooks.nsh` keeps the ownership-checked registry cleanup as a fallback if the executable call fails.
+- Silent (`/S`) and passive (`/P`) installs skip the page. A fresh unattended install with no remembered choices registers nothing; reinstall and upgrade restore only remembered types. Existing choices, including an explicitly empty set, bypass the default association page.
+- The interactive page stores its exact selection with `boshu.exe --replace-assoc ...` (`none` for no types). Later registration and cancellation in application settings update the same selection.
+- Uninstall checks whether the application is running before cleaning registrations, so cancelling that check does not first remove file associations. Its cleanup command preserves the remembered selection when retaining data.
+
+## Keeping associations across reinstall
+
+From 0.2.1, `%APPDATA%/Boshu/associations.json` stores the explicitly chosen extension set. Full uninstall removes registry entries owned by that installation, but keeping app data keeps this file. The post-install hook restores those types with commands and icons pointing at the final installation path. Choosing to delete app data also removes the actual `Boshu` data directory, not just Tauri's separate `com.boshu.editor` directory.
+
+When an older installation still has registered types, the incoming installer uses its new executable as a headless snapshot helper before the old executable is replaced or uninstalled. The temporary migration record lives in the legacy Tauri data directory so an older uninstaller's Delete app data choice removes it. Registration is performed only by the final installed executable. Types already removed by an earlier uninstall, with no saved record, must be registered once again.
+
+Registration controls the Open with list and Boshu's registered-type status. Windows owns the default application selection; the installer does not rewrite or bypass `UserChoice`.
 
 ## File icons
 
