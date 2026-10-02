@@ -46,12 +46,14 @@ node scripts/prepare-release-artifact.mjs windows-x64
 
 ```sh
 rustup target add aarch64-apple-darwin
-pnpm tauri build --ci --target aarch64-apple-darwin --bundles dmg -- --locked
+pnpm tauri build --ci --target aarch64-apple-darwin --bundles app,dmg -- --locked
 cargo test --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
 node scripts/prepare-release-artifact.mjs macos-arm64
 ```
 
 For Intel macOS, replace the target with `x86_64-apple-darwin` and the script argument with `macos-x64`. The staging script expects Tauri's target-specific output directory, so keep the explicit `--target` argument.
+
+macOS builds must select both `app` and `dmg`. With `bundle.createUpdaterArtifacts: true`, the explicit `app` target creates `Boshu.app.tar.gz` and its `.sig` in `bundle/macos`; `dmg` creates the installation disk image in `bundle/dmg`. Selecting only `dmg` creates a temporary app for the disk image but does not generate the updater archive. `tauri.macos.conf.json` selects both targets for normal local builds, and CI passes `--bundles app,dmg` explicitly. See [Tauri's updater artifact documentation](https://v2.tauri.app/plugin/updater/#building) and the [CLI bundler's archive condition](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.0/crates/tauri-bundler/src/bundle.rs#L245).
 
 ```sh
 node --test scripts/prepare-release-artifact.test.mjs
@@ -71,7 +73,7 @@ The Windows CI job additionally runs `scripts/qa-windows-installer.ps1` on its d
 
 Tauri automatically merges `src-tauri/tauri.macos.conf.json`. It enables the transparent-window API, bundles the existing icon as ICNS and PNG, uses a minimum macOS version of 11.0, and uses the ad-hoc signing identity `-`. No Apple certificate or notarization credentials are needed for this configuration. Ad-hoc signing is not Apple notarization; downloaded apps can require approval in Privacy & Security. See [Tauri's signing guide](https://v2.tauri.app/distribute/sign/macos/).
 
-The Tauri CLI manages the required `macos-private-api` Cargo feature from this configuration. The CI therefore runs the native Rust tests after `tauri build`, so the Cargo manifest and merged configuration agree. Tauri removes the intermediate `.app` when only DMG output is requested, so CI mounts the finished DMG read-only, checks its embedded app with `codesign --verify --deep --strict`, and smoke-tests that executable with an isolated HOME before uploading. The startup check requires both an onscreen app window through Core Graphics and a successful frontend-ready confirmation, catching a process that remains hidden or only displays the startup failure fallback.
+The Tauri CLI manages the required `macos-private-api` Cargo feature from this configuration. The CI therefore runs the native Rust tests after `tauri build`, so the Cargo manifest and merged configuration agree. Both the signed `.app` updater archive and the DMG are built from the application bundle. CI mounts the finished DMG read-only, checks its embedded app with `codesign --verify --deep --strict`, and smoke-tests that executable with an isolated HOME before uploading. The startup check requires both an onscreen app window through Core Graphics and a successful frontend-ready confirmation, catching a process that remains hidden or only displays the startup failure fallback.
 
 Settings, window state, and themes use `~/Library/Application Support/Boshu` on macOS. Windows keeps `%APPDATA%\Boshu`. macOS enumerates fonts through CoreText and uses AppKit's native frontmost window hit test for cross-window tab drops. Windows file associations and spell checking remain Windows-specific APIs.
 

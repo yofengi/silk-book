@@ -29,11 +29,11 @@ jobs:
           - platform: macos-arm64
             runner: macos-15
             target: aarch64-apple-darwin
-            bundle: dmg
+            bundle: 'app,dmg'
           - platform: macos-x64
             runner: macos-15-intel
             target: x86_64-apple-darwin
-            bundle: dmg
+            bundle: 'app,dmg'
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -68,10 +68,11 @@ jobs:
           node --test scripts/prepare-release-artifact.test.mjs
       - name: Build native installer
         # Tauri merges tauri.macos.conf.json and enables its managed Cargo features.
+        # macOS updater archives require an explicit app target; dmg alone is insufficient.
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} -- --locked
+        run: pnpm tauri build --ci --target ${{ matrix.target }} --bundles "${{ matrix.bundle }}" -- --locked
       - name: Run native Rust tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
       - name: Verify silent Windows installation and restart on disposable runner

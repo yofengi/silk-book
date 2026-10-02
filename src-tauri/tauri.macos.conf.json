@@ -4,7 +4,7 @@
     "macOSPrivateApi": true
   },
   "bundle": {
-    "targets": ["dmg"],
+    "targets": ["app", "dmg"],
     "icon": ["icons/app-icon.png", "icons/icon.icns"],
     "category": "Productivity",
     "macOS": {
