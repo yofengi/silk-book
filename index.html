@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>帛书</title>
+    <script>
+      // 首帧前应用主题，避免闪烁。缓存由 src/themes/index.ts（THEME_CACHE_KEY）写入；默认 glass-system。
+      (function () {
+        var s = 'glass-system';
+        try { s = localStorage.getItem('boshu.theme') || s; } catch (e) {}
+        var glass = s.indexOf('glass-') === 0, b = glass ? s.slice(6) : s;
+        var dark = b === 'dark' || (b !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        var r = document.documentElement;
+        r.dataset.theme = dark ? 'dark' : 'light';
+        if (glass) r.setAttribute('data-glass', '');
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

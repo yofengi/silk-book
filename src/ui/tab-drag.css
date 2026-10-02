@@ -1,0 +1,9 @@
+/* 跨窗口标签栏的插入槽；独立浮层不影响命中测试，也不随标签栏重绘消失。 */
+.tab-drop-insertion {
+  position: fixed;
+  width: 2px;
+  z-index: 950;
+  pointer-events: none;
+  background: var(--accent);
+  border-radius: 1px;
+}

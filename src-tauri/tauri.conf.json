@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Boshu",
+  "version": "0.1.0",
+  "identifier": "com.boshu.editor",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "帛书",
+        "width": 1000,
+        "height": 700,
+        "minWidth": 640,
+        "minHeight": 400,
+        "decorations": false,
+        "resizable": true,
+        "shadow": true,
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https: data:; font-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-zmmtQfrIgj4SsWo6mohfJZADsSvcarDCt6zK2uTfmyI='; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https: data:; font-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-zmmtQfrIgj4SsWo6mohfJZADsSvcarDCt6zK2uTfmyI='; connect-src ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "resources": {
+      "../font/woff2/MapleMono-NF-CN-Regular.woff2": "fonts/MapleMono-NF-CN-Regular.woff2",
+      "../font/woff2/MapleMono-NF-CN-Bold.woff2": "fonts/MapleMono-NF-CN-Bold.woff2",
+      "../font/woff2/MapleMono-NF-CN-Italic.woff2": "fonts/MapleMono-NF-CN-Italic.woff2",
+      "../font/woff2/MapleMono-NF-CN-BoldItalic.woff2": "fonts/MapleMono-NF-CN-BoldItalic.woff2",
+      "../font/woff2/MapleMono-NF-CN-LICENSE.txt": "fonts/MapleMono-NF-CN-LICENSE.txt",
+      "icons/file-code.ico": "icons/file-code.ico",
+      "icons/file-text.ico": "icons/file-text.ico"
+    },
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "installerIcon": "icons/icon.ico",
+        "template": "installer/installer.nsi",
+        "installerHooks": "nsis-hooks.nsh"
+      }
+    }
+  }
+}

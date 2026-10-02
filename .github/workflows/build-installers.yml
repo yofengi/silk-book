@@ -1,0 +1,97 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundle: nsis
+          - platform: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            bundle: dmg
+          - platform: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bundle: dmg
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: installers-${{ matrix.target }}
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check translations and window lifecycle
+        run: |
+          node scripts/check-i18n.mjs
+          node scripts/test-window-flows.mjs
+          node --test scripts/prepare-release-artifact.test.mjs
+      - name: Build native installer
+        # Tauri merges tauri.macos.conf.json and enables its managed Cargo features.
+        run: pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} -- --locked
+      - name: Run native Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
+      - name: Verify macOS app signature
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 src-tauri/target/${{ matrix.target }}/release/bundle/macos/Boshu.app
+      - name: Prepare installer and checksum
+        run: node scripts/prepare-release-artifact.mjs ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silk-book-${{ matrix.platform }}
+          path: release-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  checksums:
+    name: Combined checksums
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: silk-book-*
+          path: release-artifacts
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify installers and combine checksums
+        run: node scripts/prepare-release-artifact.mjs checksums
+      - uses: actions/upload-artifact@v4
+        with:
+          name: silk-book-installers
+          path: release-artifacts/*
+          if-no-files-found: error
+          retention-days: 30

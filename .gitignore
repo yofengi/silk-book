@@ -1,0 +1,32 @@
+node_modules/
+artifacts/
+release-artifacts/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Local task notes, QA output and tool state
+task_plan.md
+findings.md
+progress.md
+docs/COMPLETION-*.md
+docs/FEEDBACK-FIXES-*.md
+docs/PLAN-RELEASE-*.md
+.agents/
+.codex/
+.planning/
+.release-build/
+nul
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+Thumbs.db
+
+# Source font distribution; the application bundles the licensed WOFF2 subset.
+font/*
+!font/woff2/
+.tmp-*/

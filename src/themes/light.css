@@ -1,0 +1,54 @@
+/* light 主题：UI + 语法 token 变量。编辑器 HighlightStyle 与预览代码块共用 --tok-* */
+:root, :root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f3f3;
+  --fg: #1f2328;
+  --muted: #5f6873;
+  --border: #dcdee1;
+  --accent: #0b64c0;
+  --accent-fg: #ffffff;
+  --titlebar-bg: #ebebeb;
+  --titlebar-inactive-bg: #f3f3f3;
+  --titlebar-fg: #1f2328;
+  --tab-bg: transparent;
+  --tab-hover: #e0e0e0;
+  --statusbar-bg: #f3f3f3;
+  --win-hover: rgba(0, 0, 0, 0.06);
+  --win-active: rgba(0, 0, 0, 0.1);
+  --scrollbar: rgba(100, 100, 100, 0.35);
+  --scrollbar-hover: rgba(100, 100, 100, 0.55);
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --focus: #0b64c0;
+  --dirty: #b35900;
+  --editor-bg: #ffffff;
+  --gutter-bg: #fafafa;
+  --active-line: #f1f5fb;
+  --selection: #add6ff;
+  --cursor: #1f2328;
+  --match: #fff2a8;
+  --hover: #e6e8eb;
+  --pressed: #d6e4f5;
+  --overlay: rgba(0, 0, 0, 0.2);
+  --code-bg: #f3f4f6;
+  --ui-font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --mono-font: "Cascadia Code", "Cascadia Mono", Consolas, "Microsoft YaHei UI", monospace;
+  --ui-font-size: 13px;
+  --editor-font-size: 14px;
+
+  --tok-keyword: #af00db;
+  --tok-string: #a31515;
+  --tok-number: #098658;
+  --tok-comment: #008000;
+  --tok-type: #267f99;
+  --tok-definition: #001080;
+  --tok-function: #795e26;
+  --tok-property: #001080;
+  --tok-variable: #1f2328;
+  --tok-operator: #383a42;
+  --tok-meta: #795e26;
+  --tok-tag: #800000;
+  --tok-attribute: #e50000;
+  --tok-heading: #0b64c0;
+  --tok-link: #0b64c0;
+  --tok-invalid: #cd3131;
+}

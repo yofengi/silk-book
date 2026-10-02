@@ -1,0 +1,212 @@
+html, body, #app { height: 100%; margin: 0; }
+/* 窗口是 transparent：经典主题 html 必须不透明 */
+html { background: var(--bg); }
+body { background: var(--bg); color: var(--fg); font: var(--ui-font-size) var(--ui-font); -webkit-font-smoothing: antialiased; }
+#app { display: flex; flex-direction: column; overflow: hidden; }
+button { font: inherit; color: inherit; }
+/* hidden 属性优先于组件自身的 display（如 .statusbar 的 flex） */
+[hidden] { display: none !important; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+::selection { background: var(--selection); }
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
+
+/* ---- 标题栏：品牌 + 工具栏 + 窗口控制 + 标签栏，一个连续表面 ---- */
+.titlebar { background: var(--titlebar-bg); color: var(--titlebar-fg); user-select: none; transition: background-color .15s; }
+:root.win-inactive .titlebar { background: var(--titlebar-inactive-bg); }
+:root.win-inactive .titlebar .topbar, :root.win-inactive .titlebar .tab:not(.active) { opacity: .7; }
+.title-row { display: flex; align-items: stretch; height: 34px; }
+.topbar { flex: 1; min-width: 0; display: flex; align-items: center; gap: 1px; padding: 0 6px; overflow: hidden; }
+/* 主菜单按钮：图标按钮，非拖拽区 */
+.tb-menu { flex: none; width: 32px; height: 28px; margin-right: 4px; border: 1px solid transparent; background: none; border-radius: 5px; display: grid; place-items: center; color: var(--titlebar-fg); cursor: pointer; }
+.tb-menu:hover, .tb-menu.open { background: var(--win-hover); }
+.tb-menu:active { background: var(--win-active); }
+.tb-menu:focus-visible, .menu-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+/* 下拉菜单：与命令面板同一浮层材质 */
+.menu { position: fixed; z-index: 120; min-width: 240px; max-width: 420px; padding: 4px; box-sizing: border-box; background: var(--editor-bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); font-size: var(--ui-font-size); }
+.menu-sub { max-height: 60vh; overflow-y: auto; }
+.menu-item { display: flex; align-items: center; gap: 24px; height: 28px; padding: 0 10px; border-radius: 5px; cursor: default; color: var(--fg); outline: none; white-space: nowrap; }
+.menu-item:hover, .menu-item:focus, .menu-item.open { background: var(--hover); }
+.menu-item[aria-disabled="true"] { color: var(--muted); opacity: .55; }
+.menu-item[aria-disabled="true"]:hover { background: none; }
+.menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.menu-key { flex: none; color: var(--muted); font-size: 12px; }
+.menu-note { color: var(--muted); font-style: italic; }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.tb-btn { border: 1px solid transparent; background: none; padding: 3px 8px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+.tb-btn:hover:not(:disabled) { background: var(--win-hover); }
+.tb-btn:active:not(:disabled) { background: var(--win-active); }
+.tb-btn:disabled { color: var(--muted); opacity: .6; cursor: default; }
+.tb-btn[aria-pressed="true"] { background: var(--pressed); color: var(--fg); }
+.tb-sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; flex: none; }
+.tb-spacer { flex: 1; align-self: stretch; }
+
+.win-controls { display: flex; flex: none; }
+.win-btn { width: 46px; border: none; background: none; display: grid; place-items: center; cursor: default; color: var(--titlebar-fg); }
+.win-btn:hover { background: var(--win-hover); }
+.win-btn:active { background: var(--win-active); }
+.win-close:hover { background: #c42b1c; color: #fff; }
+.win-close:active { background: #b22a1b; color: #fff; }
+
+.tabbar { display: flex; align-items: flex-end; overflow-x: auto; overflow-y: hidden; height: 32px; padding: 0 6px; gap: 2px; scrollbar-width: none; border-bottom: 1px solid var(--border); }
+.tab { position: relative; display: flex; flex: 0 0 auto; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 12px; border-radius: 6px 6px 0 0; cursor: pointer; white-space: nowrap; color: var(--muted); background: var(--tab-bg); max-width: 220px; touch-action: none; }
+.tab.dragging, .tab.moving { opacity: .45; }
+.tab-dragging, .tab-dragging * { cursor: grabbing !important; }
+.tab.tab-drag-preview { position: fixed; z-index: 1000; box-sizing: border-box; pointer-events: none; opacity: .9; border: 1px solid var(--accent); box-shadow: var(--shadow); border-radius: 6px; background: var(--editor-bg); }
+.tab-close:disabled { cursor: wait; }
+.tab-name { overflow: hidden; text-overflow: ellipsis; }
+.tab:hover { background: var(--tab-hover); color: var(--fg); }
+/* 活动标签与编辑器同色并盖住底边框，无缝衔接 */
+.tab.active { background: var(--editor-bg); color: var(--fg); height: 29px; margin-bottom: -1px; box-shadow: 0 0 0 1px var(--border); clip-path: inset(-1px -1px 1px -1px); }
+.tab.active::before { content: ""; position: absolute; left: 8px; right: 8px; top: 0; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent); }
+.tab-close { width: 20px; height: 20px; border: none; background: none; cursor: pointer; border-radius: 4px; display: grid; place-items: center; color: inherit; opacity: 0; }
+.tab:hover .tab-close, .tab.active .tab-close, .tab-close:focus-visible, .tab.dirty .tab-close { opacity: 1; }
+.tab-close:hover { background: var(--win-active); }
+.tab.dirty .tab-close svg { display: none; }
+.tab.dirty .tab-close::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--dirty); }
+.tab.dirty .tab-close:hover svg { display: block; }
+.tab.dirty .tab-close:hover::after { display: none; }
+
+/* 将 CodeMirror 的面板/提示层限制在编辑区，窗口菜单始终在其上。 */
+.editor-host { position: relative; z-index: 0; flex: 1; min-height: 0; background: var(--editor-bg); }
+.editor-host .cm-editor { height: 100%; }
+.overlay-host:empty { display: none; }
+
+.statusbar { display: flex; align-items: center; height: 24px; padding: 0 8px; gap: 4px; background: var(--statusbar-bg); color: var(--muted); border-top: 1px solid var(--border); font-size: 12px; }
+.sb-item { padding: 0 6px; }
+.sb-btn { border: none; background: none; cursor: pointer; height: 20px; border-radius: 3px; color: inherit; }
+.sb-btn:hover { background: var(--win-hover); color: var(--fg); }
+
+.palette-overlay { position: fixed; inset: 0; background: var(--overlay); display: flex; justify-content: center; align-items: flex-start; padding-top: 72px; z-index: 100; }
+.palette { width: min(600px, 90vw); background: var(--editor-bg); border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; }
+.palette-input { width: 100%; box-sizing: border-box; border: none; border-bottom: 1px solid var(--border); padding: 10px 14px; font: inherit; font-size: 14px; outline: none; background: none; color: inherit; }
+.palette-list { list-style: none; margin: 0; padding: 4px; max-height: 50vh; overflow-y: auto; }
+.palette-list li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; cursor: pointer; border-radius: 4px; }
+.palette-list li:hover { background: var(--hover); }
+.palette-list li.selected { background: var(--pressed); box-shadow: inset 2px 0 0 var(--accent); }
+.palette-list .detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.progress { display: flex; align-items: center; gap: 10px; padding: 4px 12px; border-top: 1px solid var(--border); background: var(--statusbar-bg); font-size: 12px; }
+.progress-track { flex: 1; height: 4px; background: var(--hover); border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width .12s linear; }
+.progress-pct { min-width: 3em; text-align: right; color: var(--muted); }
+
+/* ---- M4 Markdown 分屏预览 ---- */
+.work { flex: 1; min-height: 0; display: flex; }
+.work > .editor-host { flex: 1; min-width: 0; }
+.work.split > .editor-host, .work.split > .preview-host { flex: 1 1 50%; }
+.preview-host { min-width: 0; border-left: 1px solid var(--border); background: var(--editor-bg); display: flex; }
+.preview-host[hidden] { display: none; }
+.editor-host[hidden] { display: none; }
+/* 特殊标签页（设置）内容区：盖住编辑区位置，编辑器 DOM 保留 */
+.special-host { flex: 1; min-width: 0; min-height: 0; display: flex; background: var(--editor-bg); }
+.special-host[hidden] { display: none; }
+.tab.special .tab-icon { flex: none; opacity: .8; }
+.md-preview { flex: 1; overflow: auto; padding: 20px 32px 48px; line-height: 1.7; font-size: 15px; }
+.md-body { max-width: 860px; margin: 0 auto; overflow-wrap: break-word; }
+.md-body > :first-child { margin-top: 0; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 { margin: 1.4em 0 .6em; line-height: 1.3; font-weight: 600; }
+.md-body h1 { font-size: 1.9em; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+.md-body h2 { font-size: 1.45em; padding-bottom: .25em; border-bottom: 1px solid var(--border); }
+.md-body h3 { font-size: 1.2em; }
+.md-body h5, .md-body h6 { font-size: .95em; color: var(--muted); }
+.md-body p, .md-body ul, .md-body ol, .md-body table, .md-body pre, .md-body blockquote { margin: 0 0 1em; }
+.md-body ul, .md-body ol { padding-left: 1.8em; }
+.md-body hr { border: none; height: 1px; background: var(--border); margin: 1.6em 0; }
+.md-body code { font-family: var(--mono-font); font-size: .88em; background: var(--code-bg); padding: .15em .4em; border-radius: 4px; }
+.md-body pre { background: var(--code-bg); padding: 12px 16px; border-radius: 6px; overflow: auto; line-height: 1.5; border: 1px solid var(--border); }
+.md-body pre code { background: none; padding: 0; }
+.md-body table { border-collapse: collapse; display: block; max-width: 100%; overflow: auto; }
+.md-body th, .md-body td { border: 1px solid var(--border); padding: 6px 12px; }
+.md-body th { background: var(--code-bg); font-weight: 600; text-align: left; }
+.md-body blockquote { padding: .2em 1em; border-left: 4px solid var(--accent); background: var(--code-bg); border-radius: 0 4px 4px 0; color: var(--muted); }
+.md-body blockquote > :last-child { margin-bottom: 0; }
+.md-body img { max-width: 100%; border-radius: 4px; }
+.md-body a { color: var(--accent); text-decoration: none; cursor: pointer; }
+.md-body a:hover { text-decoration: underline; }
+.md-body .task-list-item { list-style: none; }
+.md-body .task-list-item-checkbox { margin: 0 .45em 0 -1.3em; vertical-align: middle; accent-color: var(--accent); }
+.md-img-blocked, .md-mermaid-error { color: var(--muted); }
+.md-img-blocked { display: inline-block; padding: 2px 8px; border: 1px dashed var(--border); border-radius: 4px; font-size: .9em; }
+.md-math-display { overflow-x: auto; text-align: center; }
+.md-seg-pending { contain: strict; }
+/* Lezer classHighlighter 的类名：与编辑器 HighlightStyle 共用 --tok-* 变量 */
+.tok-keyword, .tok-operatorKeyword { color: var(--tok-keyword); }
+.tok-string, .tok-string2 { color: var(--tok-string); }
+.tok-number, .tok-bool, .tok-atom { color: var(--tok-number); }
+.tok-comment { color: var(--tok-comment); font-style: italic; }
+.tok-typeName, .tok-className, .tok-namespace { color: var(--tok-type); }
+.tok-propertyName { color: var(--tok-property); }
+.tok-variableName.tok-definition, .tok-propertyName.tok-definition { color: var(--tok-definition); }
+.tok-variableName.tok-function, .tok-propertyName.tok-function, .tok-macroName { color: var(--tok-function); }
+.tok-operator, .tok-punctuation { color: var(--tok-operator); }
+.tok-meta { color: var(--tok-meta); }
+.tok-tagName, .tok-angleBracket { color: var(--tok-tag); }
+.tok-attributeName { color: var(--tok-attribute); }
+.tok-heading { color: var(--tok-heading); font-weight: bold; }
+.tok-link, .tok-url { color: var(--tok-link); }
+.tok-invalid { color: var(--tok-invalid); }
+
+/* ---- 毛玻璃主题 ----
+   无材质（Win10/失败/减少透明度）：html 用不透明渐变兜底，半透明表面叠在其上，不会透出桌面。
+   有材质（.glass-material）：html/body 透明，交给 Mica/Acrylic。 */
+:root[data-glass] { background: var(--glass-fallback); }
+:root[data-glass] body { background: transparent; }
+:root[data-glass].glass-material { background: transparent; }
+:root[data-glass] .preview-host { background: var(--preview-bg); }
+:root[data-glass] .tab.active { background: var(--editor-bg); }
+/* 编辑表面只涂在滚动区。面板祖先不再叠加两层底色，浮层可采样窗口材质。 */
+:root[data-glass] .editor-host,
+:root[data-glass] .editor-host .cm-editor { background: transparent; }
+:root[data-glass] .editor-host .cm-scroller { background: var(--editor-bg); }
+/* 失焦：材质变灰（FollowsWindowActiveState），同时提高表面不透明度 */
+:root[data-glass].win-inactive .editor-host { --editor-bg: var(--inactive-surface); }
+:root[data-glass].win-inactive .titlebar, :root[data-glass].win-inactive .statusbar { background: var(--titlebar-inactive-bg); }
+/* 浮层：模糊 + 渐变光泽 + 1px 边框 + 大阴影 + 10px 圆角。只在小面积元素上用 backdrop-filter */
+:root[data-glass] .palette,
+:root[data-glass] .menu,
+:root[data-glass] .cm-tooltip,
+:root[data-glass] .cm-panels {
+  background: var(--float-sheen), var(--float-bg);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid var(--float-border);
+  box-shadow: var(--float-shadow);
+  border-radius: 10px;
+}
+:root[data-glass] .progress { background: var(--float-sheen), var(--float-bg); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+/* 搜索面板浮起在编辑器内而不是贴边条 */
+:root[data-glass] .cm-panels.cm-panels-top { margin: 6px 12px; border: 1px solid var(--float-border); }
+:root[data-glass] .cm-panels.cm-panels-bottom { margin: 6px 12px; }
+:root[data-glass] .cm-textfield { background: var(--editor-bg); }
+/* WebKit uses the prefixed filter on older macOS. Engines with neither form
+   keep the same sheen and border over an opaque, readable surface. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root[data-glass] .palette,
+  :root[data-glass] .menu,
+  :root[data-glass] .cm-tooltip,
+  :root[data-glass] .cm-panels,
+  :root[data-glass] .progress { background: var(--float-sheen), var(--inactive-surface); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-glass] { --editor-bg: var(--inactive-surface); --preview-bg: var(--inactive-surface); --float-bg: var(--inactive-surface); }
+  :root[data-glass] .palette, :root[data-glass] .menu, :root[data-glass] .cm-tooltip, :root[data-glass] .cm-panels, :root[data-glass] .progress { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+
+/* 状态栏 v0.2：路径 + 菜单按钮 */
+.sb-btn { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; padding: 0 6px; }
+.sb-btn.open { background: var(--win-hover); color: var(--fg); }
+.sb-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.sb-btn svg { flex: none; opacity: .8; }
+.sb-path { min-width: 0; max-width: 60%; flex: 0 1 auto; }
+.sb-path-text { min-width: 0; overflow: hidden; white-space: nowrap; }
+.sb-warn { display: inline-flex; align-items: center; color: var(--tok-invalid, #e5484d); cursor: help; }
+.sb-warn:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
+.sb-menu { min-width: 200px; }
+.sb-menu .menu-item { gap: 10px; }
+.menu-icon { flex: none; width: 14px; height: 14px; display: inline-grid; place-items: center; color: var(--muted); }
+.menu-item:hover .menu-icon, .menu-item:focus .menu-icon { color: var(--fg); }
+.menu-item[role="menuitemradio"][aria-checked="true"] .menu-icon { color: var(--accent); }
+.menu-head { padding: 6px 10px 2px 34px; font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+.sb-menu.menu-sub { max-height: min(60vh, 420px); overflow-y: auto; }

@@ -1,0 +1,134 @@
+/* 设置页（懒加载 chunk）。只引用 themes/*.css 的变量，玻璃主题下沿用半透明表面 */
+.settings-page { flex: 1; min-width: 0; min-height: 0; display: flex; color: var(--fg); font: var(--ui-font-size) var(--ui-font); }
+.st-side { flex: none; width: 188px; padding: 18px 10px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; background: var(--sidebar-bg, transparent); }
+.st-side-title { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 10px 8px; letter-spacing: .02em; }
+.st-nav { display: flex; flex-direction: column; gap: 2px; }
+.st-nav-item { display: flex; align-items: center; gap: 10px; text-align: left; border: none; background: none; color: var(--fg); padding: 7px 10px; border-radius: 6px; cursor: pointer; font: inherit; position: relative; }
+.st-nav-item svg { flex: none; opacity: .85; }
+.st-nav-item:hover { background: var(--hover); }
+.st-nav-item[aria-selected="true"] { background: var(--pressed); font-weight: 600; }
+.st-nav-item[aria-selected="true"]::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--accent); }
+.st-nav-item:focus-visible, .st-btn:focus-visible, .st-theme-card:focus-visible, .st-keycap:focus-visible, .st-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.st-content { flex: 1; min-width: 0; overflow: auto; padding: 22px 32px 40px; outline: none; }
+.st-content > * { max-width: 880px; }
+.st-title { font-size: 20px; font-weight: 600; margin: 0 0 16px; }
+.st-group { margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--card-bg, rgba(127, 127, 127, .05)); }
+.st-group-title { font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+.st-desc { margin: 0 0 12px; color: var(--muted); line-height: 1.5; }
+.st-row { display: flex; align-items: center; gap: 16px; padding: 7px 0; }
+.st-row + .st-row { border-top: 1px solid var(--border); }
+.st-row-label { flex: 0 0 150px; }
+.st-row-control { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.st-hint { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.st-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.st-empty { color: var(--muted); padding: 8px 0; }
+.st-note { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; border-left: 3px solid var(--accent); background: var(--hover); line-height: 1.55; }
+.st-status { min-height: 1.4em; margin-top: 8px; color: var(--muted); }
+.st-status[data-kind="ok"] { color: var(--tok-string); }
+.st-status[data-kind="error"] { color: var(--tok-invalid); }
+
+.st-input { font: inherit; color: var(--fg); background: var(--editor-bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+.st-input:focus { border-color: var(--accent); outline: none; }
+.st-num { width: 84px; }
+.st-select { min-width: 200px; }
+.st-search { width: 100%; max-width: 360px; }
+.st-btn { font: inherit; color: var(--fg); background: var(--hover); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+.st-btn:hover:not(:disabled) { background: var(--pressed); }
+.st-btn:disabled { opacity: .5; cursor: default; }
+.st-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.st-btn-small { padding: 2px 8px; font-size: 12px; }
+.st-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 11px; line-height: 17px; color: var(--muted); border: 1px solid var(--border); }
+.st-badge.ok { color: var(--tok-string); border-color: currentColor; }
+.st-badge.on { color: var(--accent); border-color: currentColor; }
+/* 主题卡片 + 色板 */
+.st-theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.st-theme-cell { display: flex; flex-direction: column; gap: 4px; }
+.st-theme-card { display: flex; flex-direction: column; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: none; color: var(--fg); font: inherit; cursor: pointer; text-align: left; }
+.st-theme-card:hover { background: var(--hover); }
+.st-theme-card[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.st-theme-name { font-size: 12px; }
+.st-swatch { height: 64px; border-radius: 6px; overflow: hidden; background: var(--sw-bg); border: 1px solid rgba(127, 127, 127, .25); display: flex; flex-direction: column; }
+.st-sw-bar { height: 12px; background: var(--sw-bg); border-bottom: 1px solid rgba(127, 127, 127, .2); }
+.st-sw-editor { flex: 1; background: var(--sw-editor); padding: 7px 8px; display: flex; flex-direction: column; gap: 5px; }
+.st-sw-line { height: 4px; width: 78%; border-radius: 2px; background: var(--sw-accent); }
+.st-sw-line.short { width: 46%; background: var(--sw-fg); opacity: .6; }
+
+/* 字体组合框 */
+.st-combo { position: relative; flex: 1; max-width: 420px; }
+.st-combo-input { width: 100%; box-sizing: border-box; }
+.st-combo-list { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); max-height: 260px; overflow: auto; margin: 0; padding: 4px; list-style: none; border-radius: 8px; border: 1px solid var(--float-border, var(--border)); background: var(--float-sheen, none), var(--float-bg, var(--editor-bg)); box-shadow: var(--float-shadow, 0 8px 24px rgba(0, 0, 0, .2)); }
+.st-combo-list[hidden] { display: none; }
+/* 玻璃主题：下拉层需要模糊 + 更不透明的底，避免透出下方控件 */
+:root[data-glass] .st-combo-list { background: var(--inactive-surface); -webkit-backdrop-filter: blur(12px) saturate(140%); backdrop-filter: blur(12px) saturate(140%); }
+.st-combo-opt { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.st-combo-opt:hover, .st-combo-opt[aria-selected="true"] { background: var(--pressed); }
+.st-combo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-combo-tag { flex: none; font-size: 11px; color: var(--accent); font-family: var(--ui-font); }
+.st-font-preview { margin: 12px 0 0; padding: 12px 14px; border-radius: 8px; background: var(--editor-bg); border: 1px solid var(--border); font-family: var(--mono-font); font-size: var(--editor-font-size); line-height: var(--editor-line-height); white-space: pre; overflow: auto; }
+.st-ui-preview { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--hover); font-family: var(--ui-font); font-size: var(--ui-font-size); }
+
+/* 文件关联 */
+.st-assoc .st-note { margin-bottom: 18px; }
+.st-ext-group + .st-ext-group { margin-top: 14px; }
+.st-ext-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.st-ext-head .st-btn { flex: none; white-space: nowrap; }
+.st-ext-title { font-weight: 600; margin-right: 4px; }
+.st-ext-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 4px 10px; }
+.st-ext { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.st-ext input { flex: none; }
+.st-ext .st-badge { flex: none; margin-left: auto; white-space: nowrap; }
+.st-ext:hover { background: var(--hover); }
+.st-ext-name { min-width: 0; font-family: var(--mono-font); white-space: nowrap; }
+
+/* 快捷键表 */
+.st-keys-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.st-table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.st-keys { width: 100%; border-collapse: collapse; }
+.st-keys th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); padding: 7px 10px; background: var(--hover); }
+.st-keys td { padding: 5px 10px; border-top: 1px solid var(--border); vertical-align: middle; }
+.st-keys tr.overridden td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.st-key-id { color: var(--muted); font-family: var(--mono-font); font-size: 12px; }
+.st-keycap { font: 12px var(--mono-font); color: var(--fg); background: var(--editor-bg); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; padding: 2px 8px; min-width: 64px; cursor: pointer; text-align: left; }
+.st-keycap:hover { border-color: var(--accent); }
+.st-keycap.recording { border-color: var(--accent); color: var(--accent); }
+.st-keycap.conflict { border-color: var(--tok-invalid); }
+.st-warn { margin-left: 6px; font-size: 11px; color: var(--tok-invalid); }
+
+/* 玻璃主题：卡片与表格用半透明表面，与编辑区一致 */
+:root[data-glass] .st-group { background: var(--float-bg); border-color: var(--float-border); }
+:root[data-glass] .st-side { background: transparent; }
+
+/* 滑块开关 */
+.st-switch { position: relative; flex: none; width: 40px; height: 20px; padding: 0; border-radius: 10px; border: 1px solid var(--muted); background: transparent; cursor: pointer; transition: background .15s, border-color .15s; }
+.st-switch-thumb { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+.st-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.st-switch[aria-checked="true"] .st-switch-thumb { transform: translateX(20px); background: var(--accent-fg); }
+.st-switch:hover .st-switch-thumb { transform: scale(1.15); }
+.st-switch[aria-checked="true"]:hover .st-switch-thumb { transform: translateX(20px) scale(1.15); }
+.st-switch:focus-visible, .st-dropdown:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .st-switch, .st-switch-thumb { transition: none; } }
+
+/* 下拉栏（与字体组合框同一套浮层） */
+.st-dropdown-wrap { position: relative; width: 260px; max-width: 100%; }
+.st-dropdown { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; cursor: pointer; }
+.st-dropdown:hover { border-color: var(--accent); }
+.st-dropdown-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-dropdown-chev { flex: none; opacity: .7; }
+.st-dropdown[aria-expanded="true"] .st-dropdown-chev { transform: rotate(180deg); }
+.st-dropdown-list .st-combo-opt.active { background: var(--pressed); }
+.st-dropdown-list .st-combo-opt[aria-selected="true"] { color: var(--accent); background: none; }
+.st-dropdown-list .st-combo-opt[aria-selected="true"].active { background: var(--pressed); }
+.st-general .st-row-label { flex: 1 1 auto; min-width: 0; }
+.st-general .st-row-control { flex: 0 0 auto; margin-left: auto; }
+.st-hint-warn { color: var(--tok-invalid); }
+:root[data-glass] .st-dropdown { background: var(--float-bg); border-color: var(--float-border); }
+
+/* 最小窗口（640px）仍保留足够的标签宽度，开关不占用整个下拉栏列。 */
+@media (max-width: 760px) {
+  .st-side { width: 140px; padding: 14px 8px; }
+  .st-content { padding: 18px 16px 32px; }
+  .st-group { padding: 12px; }
+  .st-general .st-dropdown-wrap { width: 220px; }
+  .st-general .st-row { gap: 12px; }
+}

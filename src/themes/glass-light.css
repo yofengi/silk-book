@@ -1,0 +1,33 @@
+/* 毛玻璃浅色：叠加在 light.css 变量之上。所有表面都是白色半透明（rgba(255,255,255,x)），
+   文字保持深色；材质明暗由窗口主题（setTheme('light')）决定，不随系统深色而变灰。 */
+:root[data-glass][data-theme="light"] {
+  --glass-fallback: linear-gradient(135deg, #e8eef6 0%, #f3f1f6 55%, #eef3ef 100%);
+  --bg: rgba(255, 255, 255, 0.35);
+  --titlebar-bg: rgba(255, 255, 255, 0.4);
+  --titlebar-inactive-bg: rgba(243, 243, 243, 0.94);
+  --statusbar-bg: rgba(255, 255, 255, 0.45);
+  --tab-hover: rgba(255, 255, 255, 0.45);
+  --win-hover: rgba(0, 0, 0, 0.06);
+  --win-active: rgba(0, 0, 0, 0.1);
+  --border: rgba(0, 0, 0, 0.08);
+  --editor-bg: rgba(255, 255, 255, 0.6);
+  --gutter-bg: transparent;
+  --active-line: rgba(255, 255, 255, 0.55);
+  --selection: rgba(11, 100, 192, 0.22);
+  --match: rgba(230, 180, 60, 0.38);
+  --hover: rgba(0, 0, 0, 0.05);
+  --pressed: rgba(11, 100, 192, 0.15);
+  --overlay: rgba(0, 0, 0, 0.08);
+  --code-bg: rgba(0, 0, 0, 0.045);
+  --fg: #1a1d21;
+  --titlebar-fg: #1a1d21;
+  --muted: #4f5761;
+  --preview-bg: rgba(255, 255, 255, 0.66);
+  --float-bg: rgba(255, 255, 255, 0.62);
+  --float-sheen: linear-gradient(#fff2, transparent);
+  --float-border: rgba(255, 255, 255, 0.6);
+  --float-shadow: 0 25px 25px rgba(0, 0, 0, 0.15);
+  --inactive-surface: rgba(249, 249, 249, 0.95);
+  --scrollbar: rgba(60, 60, 60, 0.35);
+  --scrollbar-hover: rgba(60, 60, 60, 0.55);
+}

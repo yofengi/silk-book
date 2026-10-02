@@ -1,0 +1,10 @@
+.about-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 20px; }
+.about-brand h2 { font-weight: 600; font-size: 23px; margin: 0 0 5px; }
+.about-version { margin: 0; color: var(--muted); }
+.about-github { display: grid; place-items: center; width: 38px; height: 36px; padding: 0; }
+.about-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.about-actions:empty { display: none; }
+.about-last-checked { margin: 10px 0; }
+.about-notes { margin-top: 18px; }
+.about-notes h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+.about-release-notes { margin: 0 0 8px; padding: 10px 12px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--editor-bg); font: inherit; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }

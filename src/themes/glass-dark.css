@@ -1,0 +1,32 @@
+/* 毛玻璃深色：叠加在 dark.css 变量之上。大面积只用 rgba（窗口材质提供模糊），backdrop-filter 仅用于小浮层。
+   表面 alpha 需足够低，材质才可见；编辑区保留一层深色底以保证代码对比度。 */
+:root[data-glass][data-theme="dark"] {
+  --glass-fallback: linear-gradient(135deg, #1d2430 0%, #1a1c24 55%, #231d2b 100%);
+  --bg: rgba(24, 26, 32, 0.3);
+  --titlebar-bg: rgba(18, 20, 26, 0.12);
+  --titlebar-inactive-bg: rgba(28, 30, 36, 0.92);
+  --statusbar-bg: rgba(18, 20, 26, 0.18);
+  --tab-hover: rgba(255, 255, 255, 0.07);
+  --border: rgba(255, 255, 255, 0.09);
+  --editor-bg: rgba(16, 17, 21, 0.45);
+  --gutter-bg: transparent;
+  --active-line: rgba(255, 255, 255, 0.05);
+  --selection: rgba(70, 140, 220, 0.42);
+  --match: rgba(150, 170, 200, 0.32);
+  --hover: rgba(255, 255, 255, 0.08);
+  --pressed: rgba(78, 161, 255, 0.26);
+  --overlay: rgba(0, 0, 0, 0.22);
+  --code-bg: rgba(255, 255, 255, 0.07);
+  --fg: #e2e4e8;
+  --muted: #aab3bd;
+  --preview-bg: rgba(18, 19, 24, 0.5);
+  --float-bg: rgba(30, 32, 38, 0.62);
+  --float-sheen: linear-gradient(#fff1, transparent);
+  --float-border: rgba(255, 255, 255, 0.12);
+  --float-shadow: 0 25px 25px rgba(0, 0, 0, 0.25);
+  --inactive-surface: rgba(28, 30, 36, 0.94);
+  /* 半透明底上略提亮 token，保持对比度 */
+  --tok-comment: #7fb069;
+  --tok-operator: #dadada;
+  --tok-variable: #e2e4e8;
+}

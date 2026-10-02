@@ -1,0 +1,50 @@
+/* dark 主题：与 light.css 同一组变量名 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1b1d21;
+  --fg: #d4d4d4;
+  --muted: #9aa3ad;
+  --border: #34373d;
+  --accent: #4ea1ff;
+  --accent-fg: #0b1320;
+  --titlebar-bg: #202226;
+  --titlebar-inactive-bg: #1b1d21;
+  --titlebar-fg: #d4d4d4;
+  --tab-bg: transparent;
+  --tab-hover: #2a2d32;
+  --statusbar-bg: #1b1d21;
+  --win-hover: rgba(255, 255, 255, 0.07);
+  --win-active: rgba(255, 255, 255, 0.12);
+  --scrollbar: rgba(160, 160, 160, 0.3);
+  --scrollbar-hover: rgba(160, 160, 160, 0.5);
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --focus: #4ea1ff;
+  --dirty: #e3a03a;
+  --editor-bg: #1e1e1e;
+  --gutter-bg: #1e1e1e;
+  --active-line: #2a2d2e;
+  --selection: #264f78;
+  --cursor: #aeafad;
+  --match: #515c6a;
+  --hover: #2d3036;
+  --pressed: #0f3a5f;
+  --overlay: rgba(0, 0, 0, 0.5);
+  --code-bg: #25272b;
+
+  --tok-keyword: #c586c0;
+  --tok-string: #ce9178;
+  --tok-number: #b5cea8;
+  --tok-comment: #6a9955;
+  --tok-type: #4ec9b0;
+  --tok-definition: #9cdcfe;
+  --tok-function: #dcdcaa;
+  --tok-property: #9cdcfe;
+  --tok-variable: #d4d4d4;
+  --tok-operator: #d4d4d4;
+  --tok-meta: #dcdcaa;
+  --tok-tag: #569cd6;
+  --tok-attribute: #9cdcfe;
+  --tok-heading: #569cd6;
+  --tok-link: #4ea1ff;
+  --tok-invalid: #f44747;
+}

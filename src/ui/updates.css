@@ -1,0 +1,13 @@
+.tb-update { flex: none; display: grid; place-items: center; width: 30px; height: 28px; padding: 0; color: var(--accent); }
+.update-panel { width: min(400px, calc(100vw - 12px)); min-width: 0; max-width: none; max-height: calc(100vh - 12px); padding: 16px; overflow-y: auto; }
+.update-heading { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.update-description { margin: 0 0 12px; color: var(--muted); line-height: 1.5; }
+.update-notes-label { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.update-notes { margin: 0 0 14px; max-height: min(320px, 45vh); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; user-select: text; }
+.update-panel .menu-sep { margin: 12px 0; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.update-action { font: inherit; color: var(--fg); background: var(--hover); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.update-action:hover { background: var(--pressed); }
+.update-action.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.update-hint { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.update-error { margin: 10px 0 0; color: var(--tok-invalid, #c33); }
