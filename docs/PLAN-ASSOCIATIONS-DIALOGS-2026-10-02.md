@@ -22,7 +22,7 @@
 - [x] Implement validated, atomic persistence in the app data directory and restore only explicitly remembered or existing owned registrations.
 - [x] Update association CLI, installer hooks, and app-data deletion handling. Preserve registrations during in-place updates; remove stale executable registrations during full uninstall.
 - [x] Extend `scripts/qa-windows-installer.ps1` to verify registrations through upgrade and keep-data uninstall/reinstall on disposable CI runners only. Verify fresh silent installs register nothing and reset does not resurrect previous choices.
-- [ ] Run Rust tests and build the NSIS installer; never exercise real registry mutation/uninstall in the user's profile.
+- [x] Run Rust tests and build the NSIS installer; never exercise real registry mutation/uninstall in the user's profile.
 
 ### A2: Theme-aware confirmation service
 
@@ -41,7 +41,7 @@
 
 - [x] Review agent changes against the two reported issues and make the Windows registration/default-app distinction explicit in user-facing documentation.
 - [x] Run TypeScript, ESLint, four-locale checks, focused regressions, Rust/clippy, and native theme-confirmation checks with disposable configuration.
-- [ ] Version as 0.2.1, build signed Windows and macOS artifacts through CI, verify signatures/checksums and draft assets, then publish the complete release under the existing authorization.
+- [x] Version as 0.2.1, build signed Windows and macOS artifacts through CI, verify signatures/checksums and draft assets, then publish the complete release under the existing authorization.
 - [x] Keep keys and QA artifacts out of Git. Preserve user documents, installed app, and current windows during local testing.
 
 ## Verification evidence
@@ -51,4 +51,6 @@
 - Browser: 14 integration cases passed, including four theme modes, custom theme/font, four locales, keyboard/IME, queued/aborted dialogs and legacy WebKit API fallback; no system dialogs or page errors.
 - Native Windows: 7 isolated-client cases passed, including real top-layer dialogs with inert editors and two-window quit cancellation. QA build SHA256: f65576f96e8945a9038de045e089d6f735622d29ffd8bafe9dc30e7d027d6a95.
 - Independent review: stale legacy snapshot and unsafe missing-executable cleanup issues were fixed; no remaining release blocker found.
-- Installer CI and signed release verification are pending. Data-deletion coverage calls the fixed-path CLI; it does not click the NSIS checkbox. Actual minimum macOS WebKit behavior is simulated in browser fallback checks.
+- Installer CI run 37005695845 passed Windows, macOS ARM64, macOS Intel, and signed-feed/checksum jobs at source f69355c90f414fabcc4b93fa8bb992acffb409a4. Windows exercised silent fresh install, updater restart, saved subset reconciliation, moved-path reinstall, explicit empty selection, real 0.2.0 migration, and settings/document preservation. Data-deletion coverage calls the fixed-path CLI; it does not click the NSIS checkbox. Actual minimum macOS WebKit behavior is simulated in browser fallback checks.
+
+- Published https://github.com/yofengi/silk-book/releases/tag/v0.2.1 (release 401790742). All 9 checksums, 3 version-bound signatures, 10 uploaded GitHub asset sizes/digests, and the public latest update feed passed independent verification. The tag points to the tested source commit above. The first large artifact download ended early; a four-range retry verified the complete CI archive digest before extraction.
