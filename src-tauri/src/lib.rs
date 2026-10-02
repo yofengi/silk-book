@@ -8,6 +8,7 @@ mod macos;
 pub mod os;
 pub mod resources;
 pub mod settings;
+pub mod startup;
 pub mod system;
 pub mod themes;
 pub mod updates;
@@ -44,6 +45,7 @@ pub fn run() {
         .manage(settings::SettingsState::default())
         .manage(updates::UpdateState::default())
         .manage(window_state::WindowGeometryState::default())
+        .manage(startup::StartupState::default())
         .manage(state)
         .on_window_event(|window, event| {
             window_state::on_window_event(window, event);
@@ -73,8 +75,8 @@ pub fn run() {
                 let Some(window) = app.get_webview_window(&target) else {
                     return;
                 };
-                let _ = window.unminimize();
-                let _ = window.set_focus();
+                // A second instance must not reveal a frontend that is still booting.
+                startup::focus_when_ready(&window);
                 if !files.is_empty() {
                     // UI 订阅 open-files 前启动的第二实例文件留给 window_init，避免事件丢失。
                     if let Ok(mut pending) = state.pending.lock() {
@@ -113,11 +115,27 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            macos::setup(app.handle())?;
-            let dir = resources::fonts_dir(app.handle())?;
-            app.asset_protocol_scope().allow_directory(&dir, false)?;
-            window_state::restore_main(app.handle())?;
+            let result = (|| -> std::result::Result<(), Box<dyn std::error::Error>> {
+                for window in app.webview_windows().values() {
+                    app.state::<startup::StartupState>()
+                        .register(window.label())?;
+                    startup::watch(window);
+                }
+                #[cfg(target_os = "macos")]
+                macos::setup(app.handle())?;
+                let dir = resources::fonts_dir(app.handle())?;
+                app.asset_protocol_scope().allow_directory(&dir, false)?;
+                window_state::restore_main(app.handle())?;
+                Ok(())
+            })();
+            if let Err(error) = result {
+                for window in app.webview_windows().values() {
+                    startup::fail(
+                        window,
+                        &format!("silk book could not start / 帛书启动失败\n{error}"),
+                    );
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -148,6 +166,8 @@ pub fn run() {
             commands::system::system_locale,
             window::window_open,
             window::window_init,
+            startup::window_frontend_ready,
+            startup::window_startup_failed,
             window::window_drop_target,
             window::tab_transfer_put,
             window::tab_transfer_take,

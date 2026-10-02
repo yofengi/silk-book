@@ -3,11 +3,12 @@ import './themes/dark.css';
 import './themes/glass-light.css';
 import './themes/glass-dark.css';
 import './style.css';
-import { executeCommand } from './core/commands';
+import { executeCommand, isCommandExecutionBlocked } from './core/commands';
 import { events } from './core/events';
 import { installKeybindings } from './core/keybindings';
 import { loadSettings, watchSettings } from './core/settings';
 import { startUpdateService } from './core/updates';
+import { revealStartupWindow } from './core/startup';
 import { registerEditorCommands } from './editor/commands';
 import { setProgressHost } from './editor/files';
 import { loadAnsi } from './editor/encodings';
@@ -28,6 +29,15 @@ import { installFontWatcher } from './themes/fonts';
 async function openAll(paths: string[], hereFirst = true): Promise<void> {
   for (const [index, p] of paths.entries()) {
     try {
+      // A quit vote can freeze this newly initialized window. Cancellation must not lose
+      // its startup/second-instance files while executeCommand is deliberately blocked.
+      while (isCommandExecutionBlocked()) {
+        await new Promise<void>((resolve) => {
+          const unbind = events.on('commands.executionChanged', ({ blocked }) => {
+            if (!blocked) { unbind(); resolve(); }
+          });
+        });
+      }
       // 本窗接收首个启动文件；后续文件沿用打开偏好，避免再次转发首个文件。
       await executeCommand('file.open', { paths: [p], here: hereFirst && index === 0 });
     } catch (e) {
@@ -36,7 +46,7 @@ async function openAll(paths: string[], hereFirst = true): Promise<void> {
   }
 }
 
-async function start(): Promise<void> {
+export async function start(): Promise<void> {
   await loadSettings();
   await watchSettings();
   // 界面语言须在首次挂载 UI 之前就绪（避免先显示中文再切换）；窗口标题 = 当前语言的产品名
@@ -46,7 +56,7 @@ async function start(): Promise<void> {
   const syncTitle = () => void ipc.window.setTitle(productName());
   syncTitle();
   events.on('locale.changed', syncTitle);
-  installThemeWatcher();
+  await installThemeWatcher();
   installFontWatcher();
   registerEditorCommands();
   const root = document.getElementById('app');
@@ -63,10 +73,12 @@ async function start(): Promise<void> {
   await installIncomingTransferListener();
 
   // 先订阅第二实例的 open-files，再取本窗口的启动数据；后端会暂存尚未初始化窗口的文件。
-  await ipc.onOpenFiles((paths) => { void executeCommand('file.open', { paths }); });
+  let shown!: () => void;
+  const visible = new Promise<void>((resolve) => { shown = resolve; });
+  await ipc.onOpenFiles((paths) => { void visible.then(() => openAll(paths)); });
+  await revealStartupWindow();
+  shown();
   const initial = await ipc.windowInit();
   if (initial.transferToken) await receiveTransferredTab(initial.transferToken);
   await openAll(initial.files, !initial.transferToken);
 }
-
-void start();

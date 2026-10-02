@@ -35,6 +35,8 @@ const en: LocaleMessages = {
     commandsTip: 'Command Palette',
   },
   window: {
+    startupFailed: 'Unable to start {name}',
+    startupFailedHint: 'Please close this window and open the app again.',
     minimize: 'Minimize',
     maximize: 'Maximize',
     restore: 'Restore',

@@ -61,6 +61,7 @@ jobs:
           node --experimental-vm-modules --test scripts/a1-regression.test.mjs scripts/test-updates.mjs
           node scripts/test-window-flows.mjs
           node scripts/test-command-freeze.mjs
+          node scripts/test-startup.mjs
           node scripts/test-tab-transfers.mjs
           node scripts/test-tab-merging.mjs
           node scripts/test-tab-drop.mjs
@@ -89,7 +90,7 @@ jobs:
           hdiutil verify "$image"
           hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount_dir"
           codesign --verify --deep --strict --verbose=2 "$mount_dir/Boshu.app"
-          HOME="$test_home" "$mount_dir/Boshu.app/Contents/MacOS/boshu" > "$RUNNER_TEMP/boshu-startup.log" 2>&1 &
+          BOSHU_STARTUP_TRACE=1 HOME="$test_home" "$mount_dir/Boshu.app/Contents/MacOS/boshu" > "$RUNNER_TEMP/boshu-startup.log" 2>&1 &
           app_pid=$!
           sleep 5
           if ! kill -0 "$app_pid" 2>/dev/null; then
@@ -99,6 +100,12 @@ jobs:
           fi
           cat "$RUNNER_TEMP/boshu-startup.log"
           echo 'Packaged macOS application remained running with an isolated HOME.'
+          swift scripts/qa-macos-visible.swift "$app_pid"
+          if ! grep -Fq 'Boshu startup ready: main' "$RUNNER_TEMP/boshu-startup.log"; then
+            cat "$RUNNER_TEMP/boshu-startup.log"
+            echo 'The app did not confirm a successful frontend startup.'
+            exit 1
+          fi
       - name: Prepare installer and checksum
         run: node scripts/prepare-release-artifact.mjs ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4

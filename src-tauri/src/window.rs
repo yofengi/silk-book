@@ -351,6 +351,8 @@ pub fn create_window(
             AppError::InvalidArgument("main window configuration is missing".into())
         })?;
     config.label = label.clone();
+    config.visible = false;
+    config.maximized = false;
     crate::window_state::configure_new_window(app, &mut config, opts.x.zip(opts.y))?;
     let mut builder = WebviewWindowBuilder::from_config(app, &config)
         .map_err(|err| AppError::InvalidArgument(err.to_string()))?;
@@ -374,6 +376,8 @@ pub fn create_window(
         votes.creating.insert(label.clone());
     }
     let result = (|| -> Result<()> {
+        app.state::<crate::startup::StartupState>()
+            .register(&label)?;
         if let Some(token) = opts.transfer_token.as_ref() {
             state
                 .transfers
@@ -392,9 +396,10 @@ pub fn create_window(
                     transfer_token: opts.transfer_token,
                 },
             );
-        builder
+        let window = builder
             .build()
             .map_err(|err| AppError::Channel(err.to_string()))?;
+        crate::startup::watch(&window);
         Ok(())
     })();
     let cancelled = state.quit.lock().ok().and_then(|mut votes| {
@@ -412,6 +417,7 @@ pub fn create_window(
         let _ = app.emit("quit-cancelled", request);
     }
     if let Err(err) = result {
+        app.state::<crate::startup::StartupState>().closed(&label);
         if let Ok(mut pending) = state.pending.lock() {
             pending.remove(&label);
         }
@@ -635,6 +641,14 @@ pub fn tab_transfer_send(
             "destination window is unavailable".into(),
         ));
     }
+    if !app
+        .state::<crate::startup::StartupState>()
+        .is_ready(&target)
+    {
+        return Err(AppError::InvalidArgument(
+            "destination window is not visible and ready".into(),
+        ));
+    }
     {
         // 与退出状态同步；尚未订阅移入事件/未完成初始化的窗口不能接受迁移。
         let votes = state
@@ -682,6 +696,18 @@ pub fn tab_transfer_accept(
     window: tauri::WebviewWindow,
     state: tauri::State<'_, WindowState>,
 ) -> Result<()> {
+    if !window
+        .app_handle()
+        .state::<crate::startup::StartupState>()
+        .is_ready(window.label())
+        || !window
+            .is_visible()
+            .map_err(|err| AppError::Channel(err.to_string()))?
+    {
+        return Err(AppError::InvalidArgument(
+            "destination window is not visible and ready".into(),
+        ));
+    }
     state
         .transfers
         .lock()
@@ -743,11 +769,30 @@ pub fn tab_transfer_reject(
 
 #[tauri::command]
 pub fn app_request_quit(app: tauri::AppHandle, state: tauri::State<'_, WindowState>) -> Result<()> {
-    let request = state
-        .quit
-        .lock()
-        .map_err(|err| AppError::Channel(err.to_string()))?
-        .begin(app.webview_windows().into_keys());
+    // Failed startup windows have no editable/accepted documents or usable frontend voter.
+    // Closing their error view here keeps a later native Quit from waiting forever for JS.
+    let startup = app.state::<crate::startup::StartupState>();
+    let windows = app.webview_windows();
+    for (label, window) in windows {
+        if startup.is_failed(&label) {
+            window
+                .destroy()
+                .map_err(|error| AppError::Channel(error.to_string()))?;
+        }
+    }
+    let request = {
+        let mut votes = state
+            .quit
+            .lock()
+            .map_err(|err| AppError::Channel(err.to_string()))?;
+        // Snapshot completed windows under the same lock as `creating`: a builder cannot
+        // disappear from creating between this live snapshot and begin's participants.
+        let labels = app
+            .webview_windows()
+            .into_keys()
+            .filter(|label| !startup.is_failed(label));
+        votes.begin(labels)
+    };
     if let Some(request) = request {
         app.emit("quit-requested", request)
             .map_err(|err| AppError::Channel(err.to_string()))?;
@@ -780,6 +825,7 @@ pub fn app_quit_reply(
 }
 
 pub fn closed(app: &tauri::AppHandle, label: &str) {
+    app.state::<crate::startup::StartupState>().closed(label);
     let state = app.state::<WindowState>();
     if let Ok(mut pending) = state.pending.lock() {
         pending.remove(label);
@@ -805,6 +851,25 @@ pub fn closed(app: &tauri::AppHandle, label: &str) {
         id.map(|id| votes.reply(&id, label, false))
     });
     if let Some(Vote::Cancelled(request)) = vote {
+        let _ = app.emit("quit-cancelled", request);
+    }
+}
+
+pub fn cancel_failed_startup(app: &tauri::AppHandle, label: &str) {
+    let state = app.state::<WindowState>();
+    if let Ok(mut transfers) = state.transfers.lock() {
+        transfers.close_window(label);
+    };
+    // A missing JS module cannot replay or reject its pending vote. Unfreeze healthy
+    // windows as soon as the visible failure fallback replaces this pending participant.
+    let cancelled = state.quit.lock().ok().and_then(|mut votes| {
+        let id = votes
+            .session
+            .as_ref()
+            .map(|session| session.request.request_id.clone());
+        id.map(|id| votes.reply(&id, label, false))
+    });
+    if let Some(Vote::Cancelled(request)) = cancelled {
         let _ = app.emit("quit-cancelled", request);
     }
 }

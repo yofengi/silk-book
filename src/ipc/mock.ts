@@ -175,6 +175,8 @@ export const mockIpc: IpcApi = {
   async themeDelete(id) { mockThemes.delete(id); },
   systemLocale: async () => navigator.language,
   windowInit: async () => ({ files: [] }),
+  async windowReady() { /* 浏览器页面已经可见；保持相同就绪协议 */ },
+  async windowStartupFailed() { /* 错误页面由前端渲染 */ },
   async windowOpen() {
     // 浏览器中无法新建原生窗口；调用方据此回退（保留在当前窗口）
     throw { kind: 'unsupported', message: 'window_open is not available in the browser mock' } satisfies IpcError;

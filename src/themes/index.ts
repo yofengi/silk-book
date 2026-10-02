@@ -164,7 +164,7 @@ export function applyTheme(): void {
   root.dataset.theme = kind;
   root.toggleAttribute('data-glass', glass);
   applyUserLayer(user);
-  void syncMaterial(glass, kind);
+  materialReady = syncMaterial(glass, kind).catch((error: unknown) => console.warn('theme material failed', error));
   if (kind === current) return;
   current = kind;
   events.emit('theme.changed', { kind });
@@ -183,13 +183,14 @@ function applyUserLayer(user: UserTheme | undefined): void {
   }
 }
 
-export function installThemeWatcher(): void {
+export function installThemeWatcher(): Promise<void> {
   applyTheme();
-  void reloadUserThemes();
+  const loaded = reloadUserThemes();
   // 'system' 与 'glass-system' 都跟随系统明暗
   mql.addEventListener('change', () => { if (themeSetting().endsWith('system')) applyTheme(); });
   reducedTransparency.addEventListener('change', () => applyTheme());
   events.on('settings.changed', ({ key }) => { if (key === 'workbench.theme' || key === 'workbench.glassMaterial') applyTheme(); });
+  return loaded.then(() => materialReady);
 }
 
 // ---- 窗口材质：仅 Win11（build >= 22000）。失败或 Win10 时不加 .glass-material，
@@ -204,6 +205,7 @@ function isWin11(): Promise<boolean> {
 }
 let applied = '';
 let seq = 0;
+let materialReady: Promise<void> = Promise.resolve();
 async function syncMaterial(glass: boolean, kind: ThemeKind): Promise<void> {
   const my = ++seq;
   const pref = getSetting('workbench.glassMaterial');

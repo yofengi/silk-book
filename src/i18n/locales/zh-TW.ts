@@ -35,6 +35,8 @@ const zhTW: LocaleMessages = {
     commandsTip: '命令選擇區',
   },
   window: {
+    startupFailed: '無法啟動{name}',
+    startupFailedHint: '請關閉此視窗，然後重新開啟應用程式。',
     minimize: '最小化',
     maximize: '最大化',
     restore: '還原',

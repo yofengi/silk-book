@@ -1,6 +1,6 @@
 # Installer builds
 
-`.github/workflows/build-installers.yml` builds installers on version tags (`v0.1.0`) or a manual Actions run. It has read-only repository permissions and does not create or publish a Release. Maintainers review and upload the resulting files after the build succeeds.
+`.github/workflows/build-installers.yml` builds installers on version tags (`v0.1.1`) or a manual Actions run. It has read-only repository permissions and does not create or publish a Release. Maintainers review and upload the resulting files after the build succeeds.
 
 | Installer | Native runner | Rust target |
 | --- | --- | --- |
@@ -13,9 +13,9 @@ Each job runs the translation and window lifecycle checks, builds with the lockf
 The release filenames are:
 
 ```text
-silk-book-0.1.0-windows-x64-setup.exe
-silk-book-0.1.0-macos-arm64.dmg
-silk-book-0.1.0-macos-x64.dmg
+silk-book-0.1.1-windows-x64-setup.exe
+silk-book-0.1.1-macos-arm64.dmg
+silk-book-0.1.1-macos-x64.dmg
 SHA256SUMS.txt
 ```
 
@@ -49,7 +49,7 @@ node --test scripts/prepare-release-artifact.test.mjs
 
 Tauri automatically merges `src-tauri/tauri.macos.conf.json`. It enables the transparent-window API, bundles the existing icon as ICNS and PNG, uses a minimum macOS version of 11.0, and uses the ad-hoc signing identity `-`. No Apple certificate or notarization credentials are needed for this configuration. Ad-hoc signing is not Apple notarization; downloaded apps can require approval in Privacy & Security. See [Tauri's signing guide](https://v2.tauri.app/distribute/sign/macos/).
 
-The Tauri CLI manages the required `macos-private-api` Cargo feature from this configuration. The CI therefore runs the native Rust tests after `tauri build`, so the Cargo manifest and merged configuration agree. Tauri removes the intermediate `.app` when only DMG output is requested, so CI mounts the finished DMG read-only, checks its embedded app with `codesign --verify --deep --strict`, and smoke-tests that executable with an isolated HOME before uploading.
+The Tauri CLI manages the required `macos-private-api` Cargo feature from this configuration. The CI therefore runs the native Rust tests after `tauri build`, so the Cargo manifest and merged configuration agree. Tauri removes the intermediate `.app` when only DMG output is requested, so CI mounts the finished DMG read-only, checks its embedded app with `codesign --verify --deep --strict`, and smoke-tests that executable with an isolated HOME before uploading. The startup check requires both an onscreen app window through Core Graphics and a successful frontend-ready confirmation, catching a process that remains hidden or only displays the startup failure fallback.
 
 Settings, window state, and themes use `~/Library/Application Support/Boshu` on macOS. Windows keeps `%APPDATA%\Boshu`. macOS enumerates fonts through CoreText and uses AppKit's native frontmost window hit test for cross-window tab drops. Windows file associations and spell checking remain Windows-specific APIs.
 

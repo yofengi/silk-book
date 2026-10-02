@@ -33,6 +33,8 @@ export const zhCN = {
     commandsTip: '命令面板',
   },
   window: {
+    startupFailed: '无法启动{name}',
+    startupFailedHint: '请关闭此窗口，然后重新打开应用。',
     minimize: '最小化',
     maximize: '最大化',
     restore: '还原',

@@ -4,14 +4,16 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.QA_PLAYWRIGHT || 'playwright');
 const exec = promisify(execFile);
 const dir = path.resolve(`artifacts/qa-publishing-${Date.now()}`);
-const executable = path.resolve(`src-tauri/target/${process.env.QA_RELEASE ? 'release' : 'debug'}/boshu.exe`);
+const executable = path.resolve(process.env.QA_EXECUTABLE || `src-tauri/target/${process.env.QA_RELEASE ? 'release' : 'debug'}/boshu.exe`);
+const packageVersion = JSON.parse(await readFile('package.json', 'utf8')).version;
+const expectedAppVersion = process.env.QA_APP_VERSION || packageVersion;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let browser, context, page;
 const errors = [];
@@ -74,7 +76,7 @@ try {
     assert.equal(navigation.at(-1), '关于');
     assert.equal(navigation.at(-2), '快捷键');
     await page.getByRole('tab', { name: '关于', exact: true }).click();
-    assert.match(await page.locator('.st-content').innerText(), /0\.1\.0/);
+    assert.ok((await page.locator('.st-content').innerText()).includes(expectedAppVersion));
     await page.screenshot({ path: path.join(dir, 'about.png') });
   });
   await check('disabled size memory resets startup and new windows to default dimensions', async () => {
@@ -86,14 +88,28 @@ try {
     await second.waitForSelector('[role=toolbar]');
     assert.deepEqual(await size(second), { width: 1000, height: 700 });
   });
-  if (process.env.QA_EXPECT_RELEASE) await check('published GitHub release reports the installed version as current', async () => {
+  if (process.env.QA_EXPECT_RELEASE) await check('published GitHub release matches the expected current or available state', async () => {
     const info = await invoke(page, 'updates_info');
     assert.equal(info.repositoryUrl, 'https://github.com/yofengi/silk-book');
+    assert.equal(info.currentVersion, expectedAppVersion);
     const result = await invoke(page, 'updates_check', { manual: true });
-    assert.equal(result.status, 'current');
-    assert.equal(result.release.version, '0.1.0');
-    assert.ok(result.release.asset.url.endsWith('/silk-book-0.1.0-windows-x64-setup.exe'));
-    console.log(`LIVE RELEASE ${JSON.stringify(result)}`);
+    assert.equal(result.status, process.env.QA_EXPECT_UPDATE ? 'available' : 'current');
+    assert.equal(result.release.version, packageVersion);
+    assert.ok(result.release.asset.url.endsWith(`/silk-book-${packageVersion}-windows-x64-setup.exe`));
+    await page.keyboard.press('Control+,');
+    await page.getByRole('tab', { name: '关于', exact: true }).click();
+    await page.getByRole('button', { name: '检查更新', exact: true }).click();
+    if (process.env.QA_EXPECT_UPDATE) {
+      await page.locator('.st-about').getByText(`新版本 ${packageVersion}`, { exact: true }).waitFor({ timeout: 35000 });
+      await page.locator('.tb-update').click();
+      await page.locator('.update-panel').getByRole('button', { name: '下载更新', exact: true }).waitFor();
+      await page.locator('.update-panel').getByRole('button', { name: '忽略这次更新', exact: true }).waitFor();
+      assert.match(await page.locator('.update-notes').innerText(), /透明空窗/);
+    } else {
+      await page.getByText('当前已是最新版本。', { exact: true }).waitFor({ timeout: 35000 });
+    }
+    await page.screenshot({ path: path.join(dir, 'about-release.png') });
+    console.log(`LIVE RELEASE ${JSON.stringify({ status: result.status, version: result.release.version, asset: result.release.asset.name })}`);
   });
   await check('no uncaught frontend exceptions', () => assert.deepEqual(errors, []));
   await writeFile(path.join(dir, 'results.json'), JSON.stringify({ checks, errors }, null, 2));

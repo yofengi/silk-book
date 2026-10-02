@@ -152,6 +152,10 @@ export interface IpcApi {
   systemLocale(): Promise<string>;
   /** 本窗口初始化数据（每窗口调用一次）：main 拿命令行文件；新窗口拿 window_open 传入的 files / transferToken */
   windowInit(): Promise<WindowInit>;
+  /** 当前窗口的 UI 和关闭监听就绪后显示；后端幂等，不能指定别的窗口。 */
+  windowReady(): Promise<void>;
+  /** 显式显示当前窗口的启动错误；失败窗口不能接受草稿转移。 */
+  windowStartupFailed(message: string): Promise<void>;
   /** 新建窗口，返回窗口 label；x/y 为逻辑像素的左上角 */
   windowOpen(opts: WindowOpenOptions): Promise<string>;
   /** 屏幕物理坐标处最上层的帛书窗口；被其他应用遮挡时返回 null */

@@ -35,6 +35,8 @@ const ja: LocaleMessages = {
     commandsTip: 'コマンド パレット',
   },
   window: {
+    startupFailed: '{name}を起動できませんでした',
+    startupFailedHint: 'このウィンドウを閉じて、アプリを再度開いてください。',
     minimize: '最小化',
     maximize: '最大化',
     restore: '元に戻す',
