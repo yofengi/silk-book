@@ -20,6 +20,7 @@ const output = path.resolve(`artifacts/qa-startup-${baseline ? 'baseline' : 'fix
 const helper = path.resolve('scripts/qa-startup-native.ps1');
 const scenarios = (process.env.QA_STARTUP_CASES || 'normal,remembered').split(',');
 const openNewWindow = process.env.QA_STARTUP_NEW_WINDOW === '1';
+const testTearOut = process.env.QA_STARTUP_TEAROUT === '1';
 const reports = [];
 let ownedChild, browser, observer;
 
@@ -74,6 +75,82 @@ async function collectFrontend(page, screenshot) {
   await page.screenshot({ path: screenshot });
   return frontend;
 }
+async function physicalTransfer(page, directory, ownedPid) {
+  const nativeHelper = path.resolve('scripts/native-window-qa.ps1');
+  const native = async args => exec('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', nativeHelper, '-QaProcessId', String(ownedPid), ...args], { windowsHide: true });
+  const label = target => target.evaluate(() => window.__TAURI_INTERNALS__.metadata.currentWindow.label);
+  const origin = async target => {
+    const targetLabel = await label(target);
+    return { ...await invoke(target, 'plugin:window|inner_position', { label: targetLabel }), scale: await invoke(target, 'plugin:window|scale_factor', { label: targetLabel }) };
+  };
+  const hwnd = async target => {
+    const outer = await invoke(target, 'plugin:window|outer_position', { label: await label(target) });
+    const windows = JSON.parse((await native(['-Action', 'List'])).stdout);
+    const owned = windows.filter(window => window.x === outer.x && window.y === outer.y);
+    assert.equal(owned.length, 1, 'Physical drag requires one unambiguous owned HWND');
+    return owned[0];
+  };
+  const point = async (target, locator) => {
+    const rect = await locator.boundingBox();
+    assert.ok(rect, 'Drag element missing');
+    const position = await origin(target);
+    return { x: Math.round(position.x + (rect.x + Math.min(rect.width * 0.4, 60)) * position.scale), y: Math.round(position.y + (rect.y + rect.height / 2) * position.scale) };
+  };
+  const drag = async (target, from, to) => {
+    const handle = await hwnd(target);
+    await native(['-Action', 'Raise', '-WindowHandle', String(handle.handle)]);
+    const result = await native(['-Action', 'Drag', '-WindowHandle', String(handle.handle), '-X', String(from.x), '-Y', String(from.y), '-ToX', String(to.x), '-ToY', String(to.y)]);
+    assert.equal(JSON.parse(result.stdout.trim()).hit, handle.handle, 'Physical mouse-down was outside the owned window');
+    return handle;
+  };
+  const snapshot = async target => target.evaluate(() => ({
+    text: [...document.querySelectorAll('.cm-content .cm-line')].map(line => line.textContent).join('\n'),
+    path: document.querySelector('.tab.active')?.getAttribute('title'),
+    dirty: document.querySelector('.tab.active')?.classList.contains('dirty'),
+    selection: window.getSelection()?.toString(),
+    tabCount: document.querySelectorAll('.tabbar .tab[data-tab-id]').length,
+  }));
+  const fixture = path.join(directory, 'transfer-fixture.txt');
+  const content = 'STARTUP fixture 中文 🧵\nsecond line: preserved tab contents';
+  await writeFile(fixture, content, 'utf8');
+  await page.keyboard.press('Control+n');
+  await eventually(async () => await page.locator('.tabbar .tab').count() === 1, 'Blank source tab missing');
+  await invoke(page, 'plugin:event|emit_to', { target: { kind: 'WebviewWindow', label: await label(page) }, event: 'open-files', payload: [fixture] });
+  await eventually(async () => (await snapshot(page)).text === content, 'Fixture did not open in the source');
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('Control+Home');
+  await page.keyboard.press('Shift+End');
+  const before = await snapshot(page);
+  assert.equal(before.path, fixture);
+  assert.equal(before.dirty, false);
+  assert.equal(before.tabCount, 2);
+  assert.equal(before.selection, content.split('\n')[0]);
+  const prior = new Set(browser.contexts()[0].pages());
+  const sourceWindow = await hwnd(page);
+  const from = await point(page, page.locator('.tab.active'));
+  const to = { x: sourceWindow.x + sourceWindow.width + 120, y: sourceWindow.y + 200 };
+  const openedAt = Date.now();
+  await drag(page, from, to);
+  let detached;
+  await eventually(() => { detached = browser.contexts()[0].pages().find(target => !prior.has(target)); return !!detached; }, 'Physical tear-out did not create a WebView');
+  const frontend = await collectFrontend(detached, path.join(directory, 'tearout-ready.png'));
+  const detachedWindow = await hwnd(detached);
+  await eventually(async () => (await snapshot(page)).tabCount === 1, 'Source tab was not removed after acceptance');
+  const moved = await snapshot(detached);
+  for (const key of ['text', 'path', 'dirty', 'selection']) assert.equal(moved[key], before[key], `Tear-out changed ${key}`);
+  assert.equal(moved.tabCount, 1);
+  const backFrom = await point(detached, detached.locator('.tab.active'));
+  const backTo = await point(page, page.locator('.tabbar'));
+  await native(['-Action', 'Raise', '-WindowHandle', String(sourceWindow.handle)]);
+  await drag(detached, backFrom, backTo);
+  await eventually(async () => (await snapshot(page)).tabCount === 2, 'Physical merge did not return the tab');
+  const merged = await snapshot(page);
+  for (const key of ['text', 'path', 'dirty', 'selection']) assert.equal(merged[key], before[key], `Merge changed ${key}`);
+  await eventually(() => detached.isClosed(), 'Empty detached source did not close after the successful merge');
+  assert.equal(await readFile(fixture, 'utf8'), content, 'The original fixture was modified');
+  await page.screenshot({ path: path.join(directory, 'tearout-merged.png') });
+  return { openedAt, handle: String(detachedWindow.handle), frontend, before, moved, merged, roundTripPass: true };
+}
 async function cleanup(directory) {
   for (const page of browser?.contexts()[0]?.pages() || []) {
     if (!page.isClosed()) await invoke(page, 'plugin:window|close', { label: await page.evaluate(() => window.__TAURI_INTERNALS__.metadata.currentWindow.label).catch(() => undefined) }).catch(() => {});
@@ -102,12 +179,13 @@ for (const scenario of scenarios) {
   await writeFile(path.join(directory, 'appdata/Boshu/settings.json'), JSON.stringify({
     'workbench.language': 'zh-CN', 'updates.lastCheckedAt': Date.now(), 'updates.intervalHours': 720,
     'window.rememberSize': scenario !== 'memory-off',
+    'window.closeLastTabExits': testTearOut,
   }));
   if (scenario !== 'normal') await writeFile(path.join(directory, 'appdata/Boshu/window-state.json'), JSON.stringify({ version: 1, width: 916, height: 612, maximized: scenario === 'maximized' }));
   const observerErrors = [];
   observer = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', helper, '-OutputDirectory', directory], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
   observer.stderr.on('data', data => observerErrors.push(data.toString()));
-  let page, frontend, secondaryFrontend, secondaryOpenedAt;
+  let page, frontend, secondaryFrontend, secondaryOpenedAt, transfer;
   let launchAt, ownedPid;
   try {
     await eventually(async () => {
@@ -135,7 +213,12 @@ for (const scenario of scenarios) {
       let second;
       await eventually(() => { second = browser.contexts()[0].pages().find(target => !prior.has(target)); return !!second; }, 'New native window target missing');
       secondaryFrontend = await collectFrontend(second, path.join(directory, 'new-window-ready.png'));
+      if (testTearOut && scenario === 'remembered') {
+        await invoke(second, 'plugin:window|close', { label: secondaryFrontend.label });
+        await eventually(() => second.isClosed(), 'Empty test window did not close');
+      }
     }
+    if (testTearOut && scenario === 'remembered') transfer = await physicalTransfer(page, directory, ownedPid);
   } finally {
     await cleanup(directory);
     await writeFile(path.join(directory, 'observer-stderr.log'), observerErrors.join(''));
@@ -188,6 +271,23 @@ for (const scenario of scenarios) {
     };
     reports.push(secondary);
     console.log(`${baseline ? 'BASELINE' : secondary.pass ? 'PASS' : 'FAIL'} ${secondary.scenario}: ready before visible ${nextReadyBeforeVisible}; rect changes ${nextRectChanges.length}; client ${secondaryFrontend.width}x${secondaryFrontend.height}`);
+  }
+  if (transfer) {
+    const index = samples.findIndex(sample => sample.at >= transfer.openedAt && sample.windows.some(window => window.handle === transfer.handle && window.visible));
+    assert.ok(index >= 0, 'Detached HWND was not observed as visible');
+    const visible = samples[index];
+    const window = visible.windows.find(window => window.handle === transfer.handle);
+    const readyAt = transfer.frontend.marks.find(mark => mark.name === 'startup:ui-ready')?.at;
+    const stable = samples.filter(sample => sample.at >= visible.at && sample.at <= visible.at + 1000).flatMap(sample => sample.windows.filter(item => item.handle === transfer.handle && item.visible));
+    const changes = stable.filter(item => ['x', 'y', 'width', 'height', 'clientWidth', 'clientHeight'].some(key => item[key] !== window[key]));
+    const nativeSizeCorrect = window.clientWidth === Math.round(916 * window.dpi / 96) && window.clientHeight === Math.round(612 * window.dpi / 96);
+    const result = { scenario: 'remembered:physical-tearout-merge', version: transfer.frontend.version, ownedPid,
+      firstVisibleAt: visible.at, previousSampleAt: samples[index - 1]?.at ?? null, uiReadyAt: readyAt ?? null,
+      nativeFirstWindow: window, visibleRectChanges: changes.length, ...transfer,
+      pass: transfer.roundTripPass && readyAt !== undefined && readyAt <= visible.at + 2 && changes.length === 0 && nativeSizeCorrect && transfer.frontend.width === 916 && transfer.frontend.height === 612,
+    };
+    reports.push(result);
+    console.log(`${result.pass ? 'PASS' : 'FAIL'} ${result.scenario}: round trip ${transfer.roundTripPass}; ready before visible ${readyAt <= visible.at + 2}; rect changes ${changes.length}; client ${transfer.frontend.width}x${transfer.frontend.height}`);
   }
   await writeFile(path.join(output, 'summary.json'), JSON.stringify({ baseline, executable, executableSha256, reports }, null, 2));
 }
