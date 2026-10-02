@@ -49,21 +49,54 @@ jobs:
         with:
           workspaces: src-tauri -> target
           shared-key: installers-${{ matrix.target }}
+          cache-on-failure: true
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
-      - name: Check translations and window lifecycle
+      - name: Check frontend, translations and lifecycle regressions
+        shell: bash
         run: |
+          set -euo pipefail
+          pnpm lint
           node scripts/check-i18n.mjs
+          node --experimental-vm-modules --test scripts/a1-regression.test.mjs scripts/test-updates.mjs
           node scripts/test-window-flows.mjs
+          node scripts/test-command-freeze.mjs
+          node scripts/test-tab-transfers.mjs
+          node scripts/test-tab-merging.mjs
+          node scripts/test-tab-drop.mjs
           node --test scripts/prepare-release-artifact.test.mjs
       - name: Build native installer
         # Tauri merges tauri.macos.conf.json and enables its managed Cargo features.
         run: pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} -- --locked
       - name: Run native Rust tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
-      - name: Verify macOS app signature
+      - name: Verify packaged macOS app and smoke-test startup
         if: runner.os == 'macOS'
-        run: codesign --verify --deep --strict --verbose=2 src-tauri/target/${{ matrix.target }}/release/bundle/macos/Boshu.app
+        run: |
+          set -euo pipefail
+          image=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)
+          test -n "$image"
+          mount_dir=$(mktemp -d)
+          test_home=$(mktemp -d)
+          app_pid=''
+          cleanup() {
+            if [ -n "$app_pid" ]; then kill "$app_pid" 2>/dev/null || true; wait "$app_pid" 2>/dev/null || true; fi
+            hdiutil detach "$mount_dir" -quiet || true
+          }
+          trap cleanup EXIT
+          hdiutil verify "$image"
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount_dir"
+          codesign --verify --deep --strict --verbose=2 "$mount_dir/Boshu.app"
+          HOME="$test_home" "$mount_dir/Boshu.app/Contents/MacOS/boshu" > "$RUNNER_TEMP/boshu-startup.log" 2>&1 &
+          app_pid=$!
+          sleep 5
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            cat "$RUNNER_TEMP/boshu-startup.log"
+            echo 'The packaged application exited unexpectedly during startup.'
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/boshu-startup.log"
+          echo 'Packaged macOS application remained running with an isolated HOME.'
       - name: Prepare installer and checksum
         run: node scripts/prepare-release-artifact.mjs ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4

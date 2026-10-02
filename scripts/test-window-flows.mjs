@@ -129,4 +129,37 @@ await check('one approved vote never destroys a window before all votes', async 
   assert.equal(f.root.inert, false);
   assert.equal(f.calls.includes('destroy'), false);
 });
+await check('a dirty app quit cancellation keeps the window and allows another quit attempt', async () => {
+  const f = fixture(); f.setDirty(); f.setApprove(false); f.module.registerWindowCommands();
+  await f.module.windowLifecycleReady?.();
+  for (const requestId of ['native-quit-1', 'native-quit-2']) {
+    await f.hooks.quit({ requestId });
+    await tick();
+    assert.ok(f.calls.some((c) => Array.isArray(c) && c[0] === 'reply' && c[1] === requestId && c[2] === false));
+    assert.equal(f.calls.includes('destroy'), false);
+    assert.equal(f.root.inert, false);
+  }
+  assert.equal(f.calls.filter((c) => c === 'confirm').length, 2);
+});
+await check('app quit rejects a failed settings flush and retains the window', async () => {
+  const f = fixture(); f.failFlush(); f.module.registerWindowCommands();
+  await f.module.windowLifecycleReady?.();
+  await f.hooks.quit({ requestId: 'native-flush-failed' });
+  await tick();
+  assert.ok(f.calls.some((c) => Array.isArray(c) && c[0] === 'reply' && c[2] === false));
+  assert.equal(f.calls.includes('destroy'), false);
+  assert.equal(f.root.inert, false);
+});
+await check('approved app quit destroys only after settings flush and the global approval', async () => {
+  const f = fixture(); f.setDirty(); f.module.registerWindowCommands();
+  await f.module.windowLifecycleReady?.();
+  await f.hooks.quit({ requestId: 'native-approved' });
+  await tick();
+  assert.equal(f.calls.includes('destroy'), false);
+  const reply = f.calls.findIndex((c) => Array.isArray(c) && c[0] === 'reply' && c[2] === true);
+  assert.ok(reply > f.calls.indexOf('flush'));
+  await f.hooks.approved({ requestId: 'native-approved' });
+  await tick();
+  assert.ok(f.calls.indexOf('destroy') > reply);
+});
 if (checks.length) process.exitCode = 1;

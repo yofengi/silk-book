@@ -3,6 +3,8 @@ pub mod commands;
 pub mod error;
 pub mod fonts;
 pub mod fs;
+#[cfg(target_os = "macos")]
+mod macos;
 pub mod os;
 pub mod resources;
 pub mod settings;
@@ -111,6 +113,8 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            macos::setup(app.handle())?;
             let dir = resources::fonts_dir(app.handle())?;
             app.asset_protocol_scope().allow_directory(&dir, false)?;
             window_state::restore_main(app.handle())?;

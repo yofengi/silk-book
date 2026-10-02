@@ -15,6 +15,7 @@ export function testDom() {
       this.clientWidth = 400;
       this.scrollWidth = 100;
       this.classList = {
+        contains: (name) => this.className.split(' ').includes(name),
         add: (name) => { if (!this.className.split(' ').includes(name)) this.className += ` ${name}`; },
         remove: (name) => { this.className = this.className.split(' ').filter((word) => word !== name).join(' '); },
         toggle: (name, on) => { this.classList[on ? 'add' : 'remove'](name); },
@@ -53,6 +54,7 @@ export function testDom() {
   }
   document.body = new Element('body');
   document.createElement = (tag) => new Element(tag);
+  document.querySelector = () => null;
   document.addEventListener = () => {};
   document.removeEventListener = () => {};
   const window = { innerWidth: 800, innerHeight: 600, addEventListener() {}, removeEventListener() {} };

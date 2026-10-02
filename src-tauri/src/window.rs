@@ -977,4 +977,33 @@ mod tests {
             Vote::Approved(_)
         ));
     }
+
+    #[test]
+    fn quit_before_frontend_initialization_is_replayed_without_reviving_completed_votes() {
+        let mut votes = QuitVotes::default();
+        let request = votes.begin(["main".into(), "win-1".into()]).unwrap();
+        assert_eq!(
+            votes.init_window("main").unwrap().request_id,
+            request.request_id
+        );
+        assert!(matches!(
+            votes.reply(&request.request_id, "main", true),
+            Vote::Pending
+        ));
+        // A repeated window_init can replay the event, but cannot require a second vote.
+        assert_eq!(
+            votes.init_window("main").unwrap().request_id,
+            request.request_id
+        );
+        assert_eq!(
+            votes.init_window("win-1").unwrap().request_id,
+            request.request_id
+        );
+        assert!(matches!(
+            votes.reply(&request.request_id, "win-1", true),
+            Vote::Approved(_)
+        ));
+        assert!(votes.init_window("main").is_none());
+        assert!(votes.session.is_none());
+    }
 }
