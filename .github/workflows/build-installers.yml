@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           pnpm lint
           node scripts/check-i18n.mjs
-          node --experimental-vm-modules --test scripts/a1-regression.test.mjs scripts/test-updates.mjs
+          node --experimental-vm-modules --test scripts/a1-regression.test.mjs scripts/test-updates.mjs scripts/test-update-download.mjs scripts/test-window-file-drain.mjs
           node scripts/test-window-flows.mjs
           node scripts/test-command-freeze.mjs
           node scripts/test-startup.mjs
@@ -68,9 +68,19 @@ jobs:
           node --test scripts/prepare-release-artifact.test.mjs
       - name: Build native installer
         # Tauri merges tauri.macos.conf.json and enables its managed Cargo features.
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundle }} -- --locked
       - name: Run native Rust tests
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml --target ${{ matrix.target }}
+      - name: Verify silent Windows installation and restart on disposable runner
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem -LiteralPath 'src-tauri/target/${{ matrix.target }}/release/bundle/nsis' -Filter '*.exe')
+          if ($installer.Count -ne 1) { throw 'Expected exactly one installer' }
+          ./scripts/qa-windows-installer.ps1 -Installer $installer[0].FullName
       - name: Verify packaged macOS app and smoke-test startup
         if: runner.os == 'macOS'
         run: |
@@ -106,7 +116,7 @@ jobs:
             echo 'The app did not confirm a successful frontend startup.'
             exit 1
           fi
-      - name: Prepare installer and checksum
+      - name: Verify signatures and prepare installers and update archives
         run: node scripts/prepare-release-artifact.mjs ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
         with:
@@ -116,7 +126,7 @@ jobs:
           retention-days: 30
 
   checksums:
-    name: Combined checksums
+    name: Signed update feed and checksums
     needs: build
     runs-on: ubuntu-24.04
     steps:
@@ -129,7 +139,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify installers and combine checksums
+      - name: Verify all platforms and generate update feed and checksums
         run: node scripts/prepare-release-artifact.mjs checksums
       - uses: actions/upload-artifact@v4
         with:

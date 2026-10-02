@@ -9,7 +9,7 @@ import { productName } from '../i18n';
 import {
   validExts, type AnsiEncoding, type BundledFont, type EncodingInfo, type FileAssocStatus, type FileStat, type ImportedTheme, type IpcApi, type ReadDone, type ReadResult,
   type QuitRequest, type SettingsChanged, type SettingsSnapshot, type ThemeEntry, type TransferStatus, type WindowInit, type WriteResult,
-  type UpdateCheckResult, type UpdateInfo,
+  type UpdateCheckResult, type UpdateInfo, type UpdateReady, type UpdateTransferState,
 } from './types';
 
 // 注意：全局 listen() 的 target 为 Any，会收到 emit_to 发给其他窗口的事件；
@@ -31,6 +31,11 @@ export const tauriIpc: IpcApi = {
   updateInfo: () => invoke<UpdateInfo>('updates_info'),
   checkUpdates: (manual) => invoke<UpdateCheckResult | null>('updates_check', { manual }),
   onUpdatesChecked: (fn) => listenSelf<UpdateCheckResult>('updates-checked', fn),
+  updatesTransfer: () => invoke<UpdateTransferState>('updates_transfer'),
+  downloadUpdate: (version, mode) => invoke<UpdateTransferState>('updates_download', { version, mode }),
+  installUpdate: (taskId) => invoke<void>('updates_install', { taskId }),
+  onUpdateTransfer: (fn) => listenSelf<UpdateTransferState>('updates-state-changed', fn),
+  onUpdateReady: (fn) => listenSelf<UpdateReady>('updates-ready', fn),
   openUpdateLink: (target, version) => invoke<void>('updates_open', { target, version: version ?? null }),
   // mtime：Unix 毫秒
   fileStat: (path) => invoke<FileStat>('file_stat', { path }),

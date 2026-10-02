@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Boshu",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "identifier": "com.boshu.editor",
   "build": {
     "frontendDist": "../dist",
@@ -36,6 +36,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "resources": {
       "../font/woff2/MapleMono-NF-CN-Regular.woff2": "fonts/MapleMono-NF-CN-Regular.woff2",
       "../font/woff2/MapleMono-NF-CN-Bold.woff2": "fonts/MapleMono-NF-CN-Bold.woff2",
@@ -56,6 +57,14 @@
         "template": "installer/installer.nsi",
         "installerHooks": "nsis-hooks.nsh"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJBQkY3QjZCMjEyOEQyMkQKUldRdDBpZ2hhM3UvdWw1OW1PMzFFMWtBTHl6YlBKRDhzUHpIbDhYTHcwMmFLVmtzbDBaMlI0S3QK",
+      "endpoints": ["https://github.com/yofengi/silk-book/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": { "installMode": "quiet" }
     }
   }
 }

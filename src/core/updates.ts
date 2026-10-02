@@ -1,4 +1,4 @@
-import { ipc, isIpcError, type UpdateCheckResult, type UpdateInfo, type UpdateLink } from '../ipc';
+import { ipc, isIpcError, type ReleaseInfo, type UpdateCheckResult, type UpdateInfo, type UpdateLink, type UpdateMode, type UpdateReady, type UpdateTransferState } from '../ipc';
 import { t } from '../i18n';
 import { isCommandExecutionBlocked, registerCommand } from './commands';
 import { events } from './events';
@@ -10,9 +10,16 @@ export interface UpdateViewState {
   result: UpdateCheckResult | null;
   checking: boolean;
   errorKind: string | null;
+  transfer: UpdateTransferState | null;
+  transferErrorKind: string | null;
+  startingDownload: boolean;
+  requestingInstall: boolean;
 }
 
-const state: UpdateViewState = { info: null, result: null, checking: false, errorKind: null };
+const state: UpdateViewState = {
+  info: null, result: null, checking: false, errorKind: null,
+  transfer: null, transferErrorKind: null, startingDownload: false, requestingInstall: false,
+};
 // 30 天超过 setTimeout 的 32 位范围：最长只等待一天，然后重算到期时间。
 const MAX_TIMER_MS = 24 * 3_600_000;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -21,14 +28,69 @@ let initialized = false;
 let started = false;
 let readyAfter = 0;
 let lastLocalAttempt = 0;
+let subscriptions: Promise<unknown[]> | null = null;
+let pendingReady: UpdateReady | null = null;
+const deliveredReady = new Set<string>();
 
 export function getUpdateState(): Readonly<UpdateViewState> { return state; }
 
 export function getUpdateNotification(): UpdateCheckResult | null {
+  if (state.transfer?.taskId && state.transfer.release && state.transfer.phase !== 'idle') {
+    return { status: 'available', release: state.transfer.release, checkedAt: state.result?.checkedAt ?? 0 };
+  }
   return shouldNotifyUpdate(state.result, getSetting('updates.ignoredVersion')) ? state.result : null;
 }
 
+export function getUpdateRelease(): ReleaseInfo | null {
+  return state.transfer?.taskId && state.transfer.phase !== 'idle' ? state.transfer.release : state.result?.release ?? null;
+}
+
+export function isUpdateTransferBusy(transfer = state.transfer): boolean {
+  return !!transfer && ['downloading', 'verifying', 'preparingInstall', 'installing'].includes(transfer.phase);
+}
+
 function changed(): void { events.emit('updates.changed', undefined); }
+
+function deliverReady(): void {
+  const transfer = state.transfer;
+  if (!started || isCommandExecutionBlocked() || !pendingReady || !transfer) return;
+  if (transfer.revision < pendingReady.revision) return;
+  if (transfer.taskId !== pendingReady.taskId || transfer.phase !== 'ready') {
+    pendingReady = null;
+    return;
+  }
+  const taskId = pendingReady.taskId;
+  pendingReady = null;
+  if (deliveredReady.has(taskId)) return;
+  deliveredReady.add(taskId);
+  events.emit('updates.ready', { taskId });
+}
+
+function receiveTransfer(transfer: UpdateTransferState): void {
+  if (!transfer || !Number.isSafeInteger(transfer.revision) || transfer.revision < 0
+    || !['idle', 'downloading', 'verifying', 'ready', 'preparingInstall', 'installing', 'error'].includes(transfer.phase)
+    || !Number.isSafeInteger(transfer.downloadedBytes) || transfer.downloadedBytes < 0
+    || (transfer.totalBytes !== null && (!Number.isSafeInteger(transfer.totalBytes) || transfer.totalBytes < 0))
+    || (state.transfer && transfer.revision <= state.transfer.revision)) return;
+  state.transfer = transfer;
+  state.transferErrorKind = null;
+  changed();
+  deliverReady();
+}
+
+function receiveReady(notice: UpdateReady): void {
+  if (!notice || !notice.taskId || !Number.isSafeInteger(notice.revision) || notice.revision < 0
+    || deliveredReady.has(notice.taskId)) return;
+  if (state.transfer && state.transfer.revision >= notice.revision && state.transfer.taskId !== notice.taskId) return;
+  pendingReady = notice;
+  deliverReady();
+  if (pendingReady) void ipc.updatesTransfer().then(receiveTransfer).catch(() => { /* 后续广播仍可完成通知。 */ });
+}
+
+function canDownload(): boolean {
+  const available = state.transfer?.phase === 'error' || state.result?.status === 'available' || state.result?.status === 'noAsset';
+  return available && !state.startingDownload && !isUpdateTransferBusy() && state.transfer?.phase !== 'ready' && !!getUpdateRelease()?.asset;
+}
 
 function receiveResult(result: UpdateCheckResult): void {
   if (!result || !['noReleases', 'current', 'available', 'noAsset'].includes(result.status)
@@ -70,20 +132,33 @@ export function startUpdateService(): void {
     initialized = true;
     registerCommand({ id: 'updates.check', title: () => t('updates.check'), run: () => checkForUpdates(true), when: () => !state.checking });
     registerCommand({ id: 'updates.repository', title: () => t('about.github'), run: () => openUpdateLink('repository') });
-    registerCommand({ id: 'updates.download', title: () => t('updates.download'), run: () => openUpdateLink('download'), when: () => !!state.result?.release?.asset });
-    registerCommand({ id: 'updates.release', title: () => t('updates.releasePage'), run: () => openUpdateLink('release'), when: () => !!state.result?.release });
-    registerCommand({ id: 'updates.ignore', title: () => t('updates.ignore'), run: ignoreUpdate, when: () => !!state.result?.release });
+    registerCommand({ id: 'updates.download', title: () => t('updates.download'), run: downloadUpdate, when: canDownload });
+    registerCommand({ id: 'updates.install', title: () => t(state.transfer?.mode === 'download-and-install' ? 'updates.installRestart' : 'updates.install'), run: installUpdate,
+      when: () => state.transfer?.phase === 'ready' && !!state.transfer.taskId && !state.requestingInstall });
+    registerCommand({ id: 'updates.release', title: () => t('updates.releasePage'), run: () => openUpdateLink('release'), when: () => !!getUpdateRelease() });
+    registerCommand({ id: 'updates.ignore', title: () => t('updates.ignore'), run: ignoreUpdate,
+      when: () => !!state.result?.release && (!state.transfer?.taskId || state.transfer.phase === 'idle') });
     events.on('settings.changed', ({ key }) => {
       if (key.startsWith('updates.')) { changed(); schedule(); }
     });
-    events.on('commands.executionChanged', schedule);
-    void ipc.onUpdatesChecked((result) => { if (started) receiveResult(result); }).catch(() => { /* IPC 返回仍可更新当前窗口。 */ });
+    events.on('commands.executionChanged', () => { schedule(); deliverReady(); });
+    subscriptions = Promise.allSettled([
+      ipc.onUpdatesChecked((result) => { if (started) receiveResult(result); }),
+      ipc.onUpdateTransfer((transfer) => { if (started) receiveTransfer(transfer); }),
+      ipc.onUpdateReady((notice) => { if (started) receiveReady(notice); }),
+    ]);
   }
-  void ipc.updateInfo().then((info) => {
-    state.info = info;
-    if (info.cachedResult) receiveResult(info.cachedResult);
-    changed();
-  }).catch(() => { /* 手动检查会显示具体失败。 */ });
+  // 先挂好监听再读取快照；期间到达的广播由 revision 防止旧快照回退进度。
+  void subscriptions?.then(() => Promise.allSettled([
+    ipc.updateInfo().then((info) => {
+      state.info = info;
+      if (info.cachedResult) receiveResult(info.cachedResult);
+      receiveTransfer(info.transfer);
+      changed();
+    }),
+    ipc.updatesTransfer().then(receiveTransfer),
+  ]));
+  deliverReady();
   schedule();
 }
 
@@ -127,8 +202,46 @@ export function setUpdateInterval(hours: number): void {
   setSetting('updates.intervalHours', hours);
 }
 
+export function setAutoDownload(enabled: boolean): void {
+  if (!isCommandExecutionBlocked()) setSetting('updates.autoDownload', enabled);
+}
+
+export function setManualUpdateMode(mode: string): void {
+  if (!isCommandExecutionBlocked() && (mode === 'download-only' || mode === 'download-and-install')) setSetting('updates.manualMode', mode);
+}
+
+export async function downloadUpdate(): Promise<void> {
+  if (isCommandExecutionBlocked() || !canDownload()) return;
+  const release = getUpdateRelease();
+  if (!release?.asset) return;
+  state.startingDownload = true;
+  state.transferErrorKind = null;
+  changed();
+  try {
+    await flushSettings();
+    if (isCommandExecutionBlocked()) return;
+    receiveTransfer(await ipc.downloadUpdate(release.version, getSetting('updates.manualMode') as UpdateMode));
+  } catch (error) {
+    state.transferErrorKind = isIpcError(error) ? error.kind : 'updateDownload';
+  } finally {
+    state.startingDownload = false;
+    changed();
+  }
+}
+
+export async function installUpdate(): Promise<void> {
+  const transfer = state.transfer;
+  if (isCommandExecutionBlocked() || state.requestingInstall || transfer?.phase !== 'ready' || !transfer.taskId) return;
+  state.requestingInstall = true;
+  state.transferErrorKind = null;
+  changed();
+  try { await ipc.installUpdate(transfer.taskId); }
+  catch (error) { state.transferErrorKind = isIpcError(error) ? error.kind : 'updateInstall'; }
+  finally { state.requestingInstall = false; changed(); }
+}
+
 export async function ignoreUpdate(): Promise<void> {
-  if (isCommandExecutionBlocked() || !state.result?.release) return;
+  if (isCommandExecutionBlocked() || !state.result?.release || (state.transfer?.taskId && state.transfer.phase !== 'idle')) return;
   setSetting('updates.ignoredVersion', state.result.release.version);
   changed();
   try { await flushSettings(); }
@@ -137,7 +250,7 @@ export async function ignoreUpdate(): Promise<void> {
 
 export async function openUpdateLink(target: UpdateLink): Promise<boolean> {
   if (isCommandExecutionBlocked()) return false;
-  const version = state.result?.release?.version;
+  const version = getUpdateRelease()?.version;
   if (target !== 'repository' && !version) return false;
   try {
     await ipc.openUpdateLink(target, version);

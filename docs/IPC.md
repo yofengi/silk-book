@@ -85,6 +85,16 @@ type QuitRequest = { requestId: string };
 
 ## Events
 
+### Update transfers
+
+`updates_info` includes the process-wide `transfer` snapshot; `updates_transfer` also restores any signed cache and returns that snapshot. `updates_download({ version, mode })` starts or joins a download and returns immediately, where mode is `download-only` or `download-and-install`. Neither installs automatically. `updates_install({ taskId })` accepts only the currently verified ready task and starts an all-window approval vote.
+
+`updates-state-changed` broadcasts `{ revision, taskId, phase, release, source, mode, downloadedBytes, totalBytes, error }`. Phases are `idle`, `downloading`, `verifying`, `ready`, `preparingInstall`, `installing`, or `error`; unknown total is null. `release` stays pinned to the task. Subscribe before reading and ignore older revisions. The targeted `updates-ready` event `{ taskId, revision }` asks one window to show the completion popup for automatic/download-and-install modes; restoring a snapshot does not repeat the popup.
+
+`QuitRequest.purpose` is `quit` or `installUpdate` (absent means quit). Installation approval retains the native lifecycle guard and frontend freeze; it never sends the destructive ordinary `quit-approved`. Backend installation failure or a refused vote emits `quit-cancelled`, restoring all participants. Cache/signature failures require a fresh download; valid packages remain ready after network or installer-launch failure.
+
+### Window and settings events
+
 - `open-files`: `string[]`, emitted only to the most recently focused window. The frontend decides whether to open in the current or a new window according to `window.openFilesInNewWindow`.
 - `settings-changed`: `SettingsChanged`, emitted to all windows after `settings_patch` commits.
 - `tab-transfer-offered`: `TransferOffer`, emitted only to the bound existing recipient by `tab_transfer_send`. Install `installIncomingTransferListener()` before `window_init`. The recipient rejects offers while closing or while the command gate is blocked.

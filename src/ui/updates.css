@@ -1,4 +1,7 @@
 .tb-update { flex: none; display: grid; place-items: center; width: 30px; height: 28px; padding: 0; color: var(--accent); }
+.tb-update.update-busy { width: auto; min-width: 58px; display: flex; gap: 3px; padding: 0 5px; }
+.update-icon { display: grid; place-items: center; }
+.update-badge { font-size: 10px; font-variant-numeric: tabular-nums; }
 .update-panel { width: min(400px, calc(100vw - 12px)); min-width: 0; max-width: none; max-height: calc(100vh - 12px); padding: 16px; overflow-y: auto; }
 .update-heading { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
 .update-description { margin: 0 0 12px; color: var(--muted); line-height: 1.5; }
@@ -11,3 +14,10 @@
 .update-action.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 .update-hint { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .update-error { margin: 10px 0 0; color: var(--tok-invalid, #c33); }
+.update-action:disabled { opacity: .55; cursor: default; }
+.update-progress { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 14px; }
+.update-progress[hidden] { display: none; }
+.update-progress progress { width: 100%; height: 6px; border: 0; border-radius: 3px; accent-color: var(--accent); overflow: hidden; }
+.update-progress progress::-webkit-progress-bar { border-radius: 3px; background: var(--hover); }
+.update-progress progress::-webkit-progress-value { border-radius: 3px; background: var(--accent); }
+.update-progress-text { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }

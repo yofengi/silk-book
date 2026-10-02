@@ -21,12 +21,12 @@ const HOUR_MS: u64 = 3_600_000;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct UpdateError {
-    kind: &'static str,
-    message: String,
+    pub kind: &'static str,
+    pub message: String,
 }
 
 impl UpdateError {
-    fn new(kind: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: &'static str, message: impl Into<String>) -> Self {
         Self {
             kind,
             message: message.into(),
@@ -46,22 +46,23 @@ pub struct UpdateInfo {
     platform: String,
     repository_url: &'static str,
     cached_result: Option<UpdateCheckResult>,
+    transfer: crate::update_transfer::UpdateTransferState,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseAsset {
-    name: String,
-    url: String,
+    pub name: String,
+    pub url: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseInfo {
-    version: String,
-    notes: String,
-    url: String,
-    asset: Option<ReleaseAsset>,
+    pub version: String,
+    pub notes: String,
+    pub url: String,
+    pub asset: Option<ReleaseAsset>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -79,7 +80,7 @@ pub struct UpdateCheckResult {
     status: UpdateStatus,
     checked_at: u64,
     revision: u64,
-    release: Option<ReleaseInfo>,
+    pub(crate) release: Option<ReleaseInfo>,
 }
 
 #[derive(Default)]
@@ -98,7 +99,7 @@ pub struct UpdateState {
 }
 
 impl UpdateState {
-    fn latest(&self) -> Option<UpdateCheckResult> {
+    pub(crate) fn latest(&self) -> Option<UpdateCheckResult> {
         self.snapshot
             .read()
             .ok()
@@ -146,6 +147,7 @@ pub fn updates_info(app: tauri::AppHandle, state: State<'_, UpdateState>) -> Upd
         platform: platform(),
         repository_url: REPOSITORY_URL,
         cached_result: state.latest(),
+        transfer: crate::update_transfer::snapshot(&app),
     }
 }
 
@@ -158,10 +160,16 @@ fn now_ms() -> u64 {
 }
 
 fn interval_hours(value: &Value) -> u64 {
-    match value.get("updates.intervalHours").and_then(Value::as_u64) {
-        Some(hours @ (1 | 24 | 168 | 720)) => hours,
-        _ => 24,
-    }
+    value
+        .get("updates.intervalHours")
+        .and_then(Value::as_u64)
+        .filter(|hours| matches!(hours, 1 | 24 | 168 | 720))
+        .unwrap_or(24)
+}
+
+fn auto_download_allowed(value: &Value, version: &str) -> bool {
+    value.get("updates.autoDownload").and_then(Value::as_bool) == Some(true)
+        && value.get("updates.ignoredVersion").and_then(Value::as_str) != Some(version)
 }
 
 fn check_due(last: u64, hours: u64, now: u64) -> bool {
@@ -204,7 +212,7 @@ struct GithubRelease {
     assets: Vec<GithubAsset>,
 }
 
-fn trusted_asset_url(raw: &str, tag: &str, name: &str) -> Option<String> {
+pub(crate) fn trusted_asset_url(raw: &str, tag: &str, name: &str) -> Option<String> {
     if name.is_empty()
         || name
             .chars()
@@ -235,7 +243,7 @@ fn trusted_asset_url(raw: &str, tag: &str, name: &str) -> Option<String> {
 }
 
 /// Filename architecture must be explicit; do not assume x64 for an unlabelled installer.
-fn asset_score(name: &str, os: &str, arch: &str) -> Option<u8> {
+pub(crate) fn asset_score(name: &str, os: &str, arch: &str) -> Option<u8> {
     let name = name.to_ascii_lowercase();
     let tokens: Vec<_> = name
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -462,6 +470,30 @@ pub async fn updates_check(
     let outcome = state.record(&mut cache, outcome);
     if let Ok(result) = &outcome {
         let _ = window.app_handle().emit("updates-checked", result);
+        if !manual && result.status == UpdateStatus::Available {
+            if let Some(release) = result.release.as_ref() {
+                // Honor an auto-download switch changed while the network check was in flight.
+                let latest_settings = tauri::async_runtime::spawn_blocking(|| {
+                    settings::settings_path().and_then(|path| settings::load(&path))
+                })
+                .await
+                .ok()
+                .and_then(std::result::Result::ok);
+                if latest_settings
+                    .as_ref()
+                    .is_some_and(|value| auto_download_allowed(value, &release.version))
+                {
+                    let _ = crate::update_transfer::start_download(
+                        window.app_handle().clone(),
+                        release.clone(),
+                        crate::update_transfer::DownloadMode::DownloadOnly,
+                        crate::update_transfer::DownloadSource::Automatic,
+                        None,
+                    )
+                    .await;
+                }
+            }
+        }
     }
     outcome.map(Some)
 }
@@ -485,11 +517,17 @@ pub async fn updates_open(
         match target {
             UpdateLink::Repository => REPOSITORY_URL.to_owned(),
             UpdateLink::Release | UpdateLink::Download => {
+                let pinned = crate::update_transfer::snapshot(&app).release;
                 let snapshot = state.latest();
                 let release = snapshot
                     .as_ref()
                     .and_then(|r| r.release.as_ref())
                     .filter(|r| version.as_deref() == Some(r.version.as_str()))
+                    .or_else(|| {
+                        pinned
+                            .as_ref()
+                            .filter(|r| version.as_deref() == Some(r.version.as_str()))
+                    })
                     .ok_or_else(|| {
                         UpdateError::new("invalidArgument", "release is not the inspected version")
                     })?;
@@ -515,6 +553,45 @@ pub async fn updates_open(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn automatic_downloads_are_opt_in_and_respect_ignored_versions() {
+        for value in [
+            json!({}),
+            json!({"updates.autoDownload": false}),
+            json!({"updates.autoDownload": "true"}),
+        ] {
+            assert!(!auto_download_allowed(&value, "0.3.0"));
+        }
+        assert!(auto_download_allowed(
+            &json!({"updates.autoDownload": true}),
+            "0.3.0"
+        ));
+        assert!(!auto_download_allowed(
+            &json!({"updates.autoDownload": true, "updates.ignoredVersion": "0.3.0"}),
+            "0.3.0"
+        ));
+        assert!(auto_download_allowed(
+            &json!({"updates.autoDownload": true, "updates.ignoredVersion": "0.2.0"}),
+            "0.3.0"
+        ));
+    }
+
+    #[test]
+    fn macos_keeps_browser_dmg_asset_separate_from_signed_update_archive() {
+        let value = release("v0.2.0", &[
+            ("silk-book-0.2.0-macos-arm64.dmg", "https://github.com/yofengi/silk-book/releases/download/v0.2.0/silk-book-0.2.0-macos-arm64.dmg"),
+            ("silk-book-0.2.0-macos-arm64.app.tar.gz", "https://github.com/yofengi/silk-book/releases/download/v0.2.0/silk-book-0.2.0-macos-arm64.app.tar.gz"),
+        ]);
+        let parsed = parse_release(value, "0.1.0", "macos", "aarch64", 1).unwrap();
+        assert!(parsed
+            .release
+            .unwrap()
+            .asset
+            .unwrap()
+            .name
+            .ends_with(".dmg"));
+    }
 
     fn release(tag: &str, assets: &[(&str, &str)]) -> serde_json::Value {
         json!({

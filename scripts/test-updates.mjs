@@ -19,6 +19,9 @@ async function fixture() {
   let checkedListener;
   let response = { status: 'available', checkedAt: now, release: { version: '0.2.0', notes: 'Changes', url: 'https://github.com/yofengi/silk-book/releases/tag/v0.2.0', asset: { name: 'silk-book-0.2.0-windows-x64-setup.exe', url: 'https://github.com/yofengi/silk-book/releases/download/v0.2.0/silk-book-0.2.0-windows-x64-setup.exe' } } };
   const ipc = {
+    updatesTransfer: async () => ({ revision: 0, taskId: null, phase: 'idle', release: null, source: 'manual', mode: 'download-only', downloadedBytes: 0, totalBytes: null, error: null }),
+    onUpdateTransfer: async () => {},
+    onUpdateReady: async () => {},
     updateInfo: async () => ({ currentVersion: '0.1.0', platform: 'Windows x64', repositoryUrl: 'https://github.com/yofengi/silk-book', cachedResult }),
     onUpdatesChecked: async (fn) => { checkedListener = fn; },
     checkUpdates: async (manual) => {
@@ -187,7 +190,7 @@ test('topbar notification safely displays notes and closes while commands are fr
     '../core/events': { events: { on(type, fn) { handlers.set(type, fn); return () => {}; } } },
     '../core/updates': { getUpdateNotification: () => state.result, getUpdateState: () => state },
     '../i18n': { t: (key) => key },
-    './update-text': { updateErrorText: () => 'error', updateResultText: () => 'available' },
+    './update-text': { updateErrorText: () => 'error', updateResultText: () => 'available', updateTransferText: () => 'transfer', updateTransferPercent: () => null, updateProgressText: () => 'progress' },
   }, dom);
   const button = mod.createUpdateButton();
   dom.document.body.append(button);

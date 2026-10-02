@@ -2,12 +2,13 @@
 import { isCommandExecutionBlocked, registerCommand, setCommandExecutionBlocked } from '../core/commands';
 import { flushSettings } from '../core/settings';
 import { baseName } from '../editor/document';
+import { drainFileOperations } from '../editor/files';
 import { listTabs } from '../editor/tabs';
 import { cancelOutgoingTransfers, setTransferClosing } from '../editor/transfer';
 import { t } from '../i18n';
-import { errorMessage, ipc } from '../ipc';
+import { errorMessage, ipc, type QuitRequest } from '../ipc';
 
-interface QuitSession { requestId: string; accepted: boolean }
+interface QuitSession { requestId: string; purpose: 'quit' | 'installUpdate'; accepted: boolean }
 interface CloseAttempt { cancelled: boolean; result: Promise<boolean> }
 let lifecycleReady: Promise<void> | null = null;
 let nativeClose: Promise<void> | null = null;
@@ -44,13 +45,13 @@ function release(): void {
   setCommandExecutionBlocked(previousCommandBlock);
 }
 
-function reportCloseError(error: unknown): void {
-  alert(t('window.closeFailed', { error: errorMessage(error) }));
+function reportCloseError(error: unknown, purpose: QuitSession['purpose'] = 'quit'): void {
+  alert(t(purpose === 'installUpdate' ? 'window.installSettingsFailed' : 'window.closeFailed', { error: errorMessage(error) }));
 }
 
-function prepareClose(): Promise<boolean> {
+function prepareClose(purpose: QuitSession['purpose'] = 'quit'): Promise<boolean> {
   if (attempt && !attempt.cancelled) return attempt.result;
-  if (attempt) return attempt.result.then(() => prepareClose());
+  if (attempt) return attempt.result.then(() => prepareClose(purpose));
   const current: CloseAttempt = { cancelled: false, result: Promise.resolve(false) };
   attempt = current;
   current.result = (async () => {
@@ -58,17 +59,18 @@ function prepareClose(): Promise<boolean> {
       freeze();
       await cancelOutgoingTransfers();
       if (current.cancelled) return false;
+      if (!(await drainFileOperations()) || current.cancelled) return false;
       const dirty = listTabs().filter((tab) => tab.doc.dirty);
       if (dirty.length) {
         const names = dirty.slice(0, 5).map((tab) => t('common.quoted', { name: baseName(tab.doc.path) })).join(t('common.listSep'));
         const more = dirty.length > 5 ? t('window.quitDirtyMore', { count: dirty.length }) : '';
-        if (!(await ipc.confirm(t('window.quitDirtyConfirm', { names, more })))) return false;
+        if (!(await ipc.confirm(t(purpose === 'installUpdate' ? 'window.installDirtyConfirm' : 'window.quitDirtyConfirm', { names, more })))) return false;
       }
       if (current.cancelled) return false;
       await flushSettings();
       return !current.cancelled;
     } catch (error) {
-      reportCloseError(error);
+      reportCloseError(error, purpose);
       return false;
     }
   })().finally(() => { if (attempt === current) attempt = null; });
@@ -86,12 +88,12 @@ function closeCurrentWindow(): void {
   })().catch(reportCloseError).finally(() => { nativeClose = null; release(); });
 }
 
-async function voteForQuit(requestId: string): Promise<void> {
-  if (!requestId || destroyed || quitSession?.requestId === requestId) return;
-  const session: QuitSession = { requestId, accepted: false };
+async function voteForQuit({ requestId, purpose = 'quit' }: QuitRequest): Promise<void> {
+  if (!requestId || destroyed || quitSession) return;
+  const session: QuitSession = { requestId, purpose, accepted: false };
   quitSession = session;
   freeze();
-  const allowed = await prepareClose();
+  const allowed = await prepareClose(purpose);
   if (quitSession !== session || destroyed) return;
   // 事件可能先于 reply promise 返回，必须在投票前记录本窗口已经同意。
   session.accepted = allowed;
@@ -100,13 +102,16 @@ async function voteForQuit(requestId: string): Promise<void> {
     if (!allowed && quitSession === session) { quitSession = null; release(); }
   } catch (error) {
     if (quitSession === session) { quitSession = null; release(); }
-    reportCloseError(error);
+    reportCloseError(error, purpose);
     void ipc.replyQuit(requestId, false).catch((failure: unknown) => console.warn('quit refusal failed', failure));
   }
 }
 
 async function approveQuit(requestId: string): Promise<void> {
   if (destroyed || quitSession?.requestId !== requestId || !quitSession.accepted) return;
+  // The native installer owns exit/restart after every window approves. Keep
+  // editors frozen and all windows alive so a failed launch can restore them.
+  if (quitSession.purpose === 'installUpdate') return;
   try {
     await ipc.window.destroy();
     destroyed = true;
@@ -124,7 +129,7 @@ export function windowLifecycleReady(): Promise<void> {
       event.preventDefault(); // 始终同步阻止默认销毁，包含没有脏文档的窗口。
       closeCurrentWindow();
     }),
-    ipc.onQuitRequested(({ requestId }) => { void voteForQuit(requestId); }),
+    ipc.onQuitRequested((request) => { void voteForQuit(request); }),
     ipc.onQuitApproved(({ requestId }) => { void approveQuit(requestId); }),
     ipc.onQuitCancelled(({ requestId }) => {
       if (quitSession?.requestId !== requestId) return;

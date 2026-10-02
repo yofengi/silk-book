@@ -245,12 +245,17 @@ impl TransferStore {
 #[serde(rename_all = "camelCase")]
 pub struct QuitRequest {
     request_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    purpose: Option<&'static str>,
+    #[serde(skip)]
+    install_task_id: Option<String>,
 }
 
 struct QuitSession {
     request: QuitRequest,
     pending: HashSet<String>,
     participants: HashSet<String>,
+    approved: bool,
 }
 
 #[derive(Default)]
@@ -266,30 +271,56 @@ enum Vote {
 }
 
 impl QuitVotes {
+    #[cfg(test)]
     fn begin(&mut self, labels: impl IntoIterator<Item = String>) -> Option<QuitRequest> {
-        if self.session.is_some() {
-            return None;
+        self.begin_action(labels, None).ok().flatten()
+    }
+
+    fn begin_action(
+        &mut self,
+        labels: impl IntoIterator<Item = String>,
+        install_task_id: Option<String>,
+    ) -> Result<Option<QuitRequest>> {
+        if let Some(session) = &self.session {
+            if session.request.install_task_id == install_task_id {
+                return Ok(None);
+            }
+            return Err(AppError::InvalidArgument(
+                "another quit or update installation is awaiting confirmation".into(),
+            ));
         }
         let pending: HashSet<_> = labels
             .into_iter()
             .chain(self.creating.iter().cloned())
             .collect();
         if pending.is_empty() {
-            return None;
+            return if install_task_id.is_some() {
+                Err(AppError::InvalidArgument(
+                    "no application windows are available to approve installation".into(),
+                ))
+            } else {
+                Ok(None)
+            };
         }
         let request = QuitRequest {
             request_id: uuid::Uuid::new_v4().to_string(),
+            purpose: install_task_id.as_ref().map(|_| "installUpdate"),
+            install_task_id,
         };
         self.session = Some(QuitSession {
             request: request.clone(),
             participants: pending.clone(),
             pending,
+            approved: false,
         });
-        Some(request)
+        Ok(Some(request))
     }
 
     fn init_window(&mut self, label: &str) -> Option<QuitRequest> {
         let session = self.session.as_mut()?;
+        if session.approved {
+            return None;
+        }
         if session.participants.insert(label.to_owned()) {
             session.pending.insert(label.to_owned());
         }
@@ -308,10 +339,23 @@ impl QuitVotes {
         }
         session.pending.remove(label);
         if session.pending.is_empty() {
-            Vote::Approved(self.session.take().unwrap().request)
+            if session.request.install_task_id.is_some() {
+                session.approved = true;
+                Vote::Approved(session.request.clone())
+            } else {
+                Vote::Approved(self.session.take().unwrap().request)
+            }
         } else {
             Vote::Pending
         }
+    }
+
+    fn finish_install(&mut self, id: &str) -> Option<QuitRequest> {
+        let session = self.session.as_ref()?;
+        if session.request.request_id != id || session.request.install_task_id.is_none() {
+            return None;
+        }
+        self.session.take().map(|session| session.request)
     }
 }
 
@@ -429,7 +473,7 @@ pub fn create_window(
         id.map(|id| votes.reply(&id, &label, false))
     });
     if let Some(Vote::Cancelled(request)) = cancelled {
-        let _ = app.emit("quit-cancelled", request);
+        let _ = emit_quit_cancelled(app, request);
     }
     if let Err(err) = result {
         if !keep_failed_window {
@@ -786,6 +830,25 @@ pub fn tab_transfer_reject(
 
 #[tauri::command]
 pub fn app_request_quit(app: tauri::AppHandle, state: tauri::State<'_, WindowState>) -> Result<()> {
+    request_quit_action(&app, &state, None)
+}
+
+/// Installation reuses the all-window vote while keeping its native window and
+/// transfer guard until the platform updater exits/restarts the process.
+pub fn request_update_install(app: &tauri::AppHandle, task_id: String) -> Result<()> {
+    if task_id.is_empty() {
+        return Err(AppError::InvalidArgument(
+            "update task identifier is empty".into(),
+        ));
+    }
+    request_quit_action(app, &app.state::<WindowState>(), Some(task_id))
+}
+
+fn request_quit_action(
+    app: &tauri::AppHandle,
+    state: &WindowState,
+    install_task_id: Option<String>,
+) -> Result<()> {
     // Failed startup windows have no editable/accepted documents or usable frontend voter.
     // Closing their error view here keeps a later native Quit from waiting forever for JS.
     let startup = app.state::<crate::startup::StartupState>();
@@ -808,13 +871,58 @@ pub fn app_request_quit(app: tauri::AppHandle, state: tauri::State<'_, WindowSta
             .webview_windows()
             .into_keys()
             .filter(|label| !startup.is_failed(label));
-        votes.begin(labels)
+        votes.begin_action(labels, install_task_id)?
     };
     if let Some(request) = request {
-        app.emit("quit-requested", request)
-            .map_err(|err| AppError::Channel(err.to_string()))?;
+        if let Err(error) = app.emit("quit-requested", &request) {
+            let cancelled = state.quit.lock().ok().and_then(|mut votes| {
+                if votes
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.request.request_id == request.request_id)
+                {
+                    votes.session.take().map(|session| session.request)
+                } else {
+                    None
+                }
+            });
+            if let Some(cancelled) = cancelled {
+                let _ = emit_quit_cancelled(app, cancelled);
+            }
+            return Err(AppError::Channel(error.to_string()));
+        }
     }
     Ok(())
+}
+
+fn emit_quit_cancelled(app: &tauri::AppHandle, request: QuitRequest) -> Result<()> {
+    if let Some(task_id) = request.install_task_id.as_ref() {
+        crate::update_transfer::cancel_install(app, task_id);
+    }
+    app.emit("quit-cancelled", request)
+        .map_err(|error| AppError::Channel(error.to_string()))
+}
+
+fn install_after_approval(app: tauri::AppHandle, request: QuitRequest) {
+    let Some(task_id) = request.install_task_id.clone() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        if crate::update_transfer::install_approved(app.clone(), task_id)
+            .await
+            .is_err()
+        {
+            let cancelled = app
+                .state::<WindowState>()
+                .quit
+                .lock()
+                .ok()
+                .and_then(|mut votes| votes.finish_install(&request.request_id));
+            if let Some(cancelled) = cancelled {
+                let _ = emit_quit_cancelled(&app, cancelled);
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -832,12 +940,14 @@ pub fn app_quit_reply(
         .reply(&request_id, window.label(), allow);
     match vote {
         Vote::Pending => Ok(()),
+        Vote::Approved(request) if request.install_task_id.is_some() => {
+            install_after_approval(app, request);
+            Ok(())
+        }
         Vote::Approved(request) => app
             .emit("quit-approved", request)
             .map_err(|err| AppError::Channel(err.to_string())),
-        Vote::Cancelled(request) => app
-            .emit("quit-cancelled", request)
-            .map_err(|err| AppError::Channel(err.to_string())),
+        Vote::Cancelled(request) => emit_quit_cancelled(&app, request),
     }
 }
 
@@ -868,7 +978,7 @@ pub fn closed(app: &tauri::AppHandle, label: &str) {
         id.map(|id| votes.reply(&id, label, false))
     });
     if let Some(Vote::Cancelled(request)) = vote {
-        let _ = app.emit("quit-cancelled", request);
+        let _ = emit_quit_cancelled(app, request);
     }
 }
 
@@ -887,7 +997,7 @@ pub fn cancel_failed_startup(app: &tauri::AppHandle, label: &str) {
         id.map(|id| votes.reply(&id, label, false))
     });
     if let Some(Vote::Cancelled(request)) = cancelled {
-        let _ = app.emit("quit-cancelled", request);
+        let _ = emit_quit_cancelled(app, request);
     }
 }
 
@@ -1012,6 +1122,114 @@ mod tests {
             votes.reply(&request.request_id, "win-1", true),
             Vote::Approved(_)
         ));
+    }
+
+    #[test]
+    fn installation_approval_retains_guard_and_ignores_duplicate_votes() {
+        let mut votes = QuitVotes::default();
+        let request = votes
+            .begin_action(["main".into(), "win-1".into()], Some("package-1".into()))
+            .unwrap()
+            .unwrap();
+        assert_eq!(request.purpose, Some("installUpdate"));
+        assert!(matches!(
+            votes.reply(&request.request_id, "main", true),
+            Vote::Pending
+        ));
+        assert!(matches!(
+            votes.reply(&request.request_id, "win-1", true),
+            Vote::Approved(_)
+        ));
+        assert!(
+            votes.session.is_some(),
+            "installation must block new windows and transfers until exit or failure"
+        );
+        assert!(matches!(
+            votes.reply(&request.request_id, "win-1", true),
+            Vote::Pending
+        ));
+        assert!(matches!(
+            votes.reply(&request.request_id, "main", false),
+            Vote::Pending
+        ));
+        assert!(votes.init_window("main").is_none());
+        assert!(votes.begin_action(["main".into()], None).is_err());
+        assert!(votes.finish_install("stale-request").is_none());
+        assert!(votes.session.is_some());
+        assert_eq!(votes.finish_install(&request.request_id).unwrap(), request);
+        assert!(votes.begin(["main".into()]).is_some());
+    }
+
+    #[test]
+    fn quit_and_different_installations_cannot_share_confirmation() {
+        let mut votes = QuitVotes::default();
+        let quit = votes.begin(["main".into()]).unwrap();
+        assert!(votes
+            .begin_action(["main".into()], Some("package-1".into()))
+            .is_err());
+        assert!(matches!(
+            votes.reply(&quit.request_id, "main", false),
+            Vote::Cancelled(_)
+        ));
+        let install = votes
+            .begin_action(["main".into()], Some("package-1".into()))
+            .unwrap()
+            .unwrap();
+        assert!(votes
+            .begin_action(["main".into()], Some("package-1".into()))
+            .unwrap()
+            .is_none());
+        assert!(votes
+            .begin_action(["main".into()], Some("package-2".into()))
+            .is_err());
+        assert!(matches!(
+            votes.reply(&quit.request_id, "main", true),
+            Vote::Pending
+        ));
+        assert!(matches!(
+            votes.reply(&install.request_id, "main", false),
+            Vote::Cancelled(_)
+        ));
+        assert!(votes.session.is_none());
+        assert!(votes
+            .begin_action(["main".into()], Some("package-2".into()))
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn installation_waits_for_hidden_window_and_failed_startup_cancels_it() {
+        let mut votes = QuitVotes::default();
+        votes.creating.insert("hidden".into());
+        let request = votes
+            .begin_action(["main".into()], Some("package-1".into()))
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            votes.reply(&request.request_id, "main", true),
+            Vote::Pending
+        ));
+        assert_eq!(votes.init_window("hidden").unwrap(), request);
+        assert!(matches!(
+            votes.reply(&request.request_id, "hidden", false),
+            Vote::Cancelled(_)
+        ));
+        assert!(votes.session.is_none());
+    }
+
+    #[test]
+    fn install_session_serialization_keeps_package_identifier_private() {
+        let mut votes = QuitVotes::default();
+        let request = votes
+            .begin_action(["main".into()], Some("package-1".into()))
+            .unwrap()
+            .unwrap();
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["purpose"], "installUpdate");
+        assert_eq!(value.as_object().unwrap().len(), 2);
+        let mut votes = QuitVotes::default();
+        let ordinary = serde_json::to_value(votes.begin(["main".into()]).unwrap()).unwrap();
+        assert_eq!(ordinary.as_object().unwrap().len(), 1);
     }
 
     #[test]

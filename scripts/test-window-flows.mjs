@@ -25,12 +25,13 @@ function fixture() {
   const commands = new Map();
   const hooks = {};
   const calls = [];
+  const confirmations = [];
   const root = { inert: false };
   let dirty = [];
   let approve = true;
   let failFlush = false;
   const ipc = {
-    confirm: async () => { calls.push('confirm'); return approve; },
+    confirm: async (message) => { calls.push('confirm'); confirmations.push(message); return approve; },
     requestQuit: async () => { calls.push('request-quit'); },
     replyQuit: async (requestId, allow) => { calls.push(['reply', requestId, allow]); },
     onQuitRequested: async (fn) => { hooks.quit = fn; },
@@ -50,6 +51,7 @@ function fixture() {
     },
     '../core/settings': { flushSettings: async () => { calls.push('flush'); if (failFlush) throw Error('disk full'); } },
     '../editor/document': { baseName: (path) => path ?? 'untitled' },
+    '../editor/files': { drainFileOperations: async () => true },
     '../editor/tabs': { listTabs: () => dirty },
     '../editor/transfer': {
       setTransferClosing() {},
@@ -59,7 +61,7 @@ function fixture() {
     '../ipc': { ipc, errorMessage: (e) => e.message },
   }, { document: { getElementById: () => root, documentElement: { classList: { toggle() {} } } }, alert: (s) => calls.push(['alert', s]) });
   return {
-    module, commands, calls, hooks, root,
+    module, commands, calls, confirmations, hooks, root,
     setDirty: () => { dirty = [{ doc: { path: null, dirty: true } }]; },
     setApprove: (value) => { approve = value; },
     failFlush: () => { failFlush = true; },
@@ -161,5 +163,57 @@ await check('approved app quit destroys only after settings flush and the global
   await f.hooks.approved({ requestId: 'native-approved' });
   await tick();
   assert.ok(f.calls.indexOf('destroy') > reply);
+});
+await check('installation approval keeps the window frozen until native installation finishes', async () => {
+  const f = fixture(); f.module.registerWindowCommands();
+  await f.module.windowLifecycleReady();
+  f.hooks.quit({ requestId: 'install-approved', purpose: 'installUpdate' });
+  await tick();
+  f.hooks.approved({ requestId: 'install-approved', purpose: 'installUpdate' });
+  await tick();
+  assert.equal(f.calls.includes('destroy'), false);
+  assert.equal(f.root.inert, true);
+  // A native launch failure leaves the package ready, releases every voter,
+  // and permits a later ordinary close.
+  f.hooks.cancelled({ requestId: 'install-approved', purpose: 'installUpdate' });
+  assert.equal(f.root.inert, false);
+  f.hooks.close({ preventDefault() {} });
+  await tick();
+  assert.equal(f.calls.includes('destroy'), true);
+});
+await check('installation dirty confirmation describes the restart and cancels safely', async () => {
+  const f = fixture(); f.setDirty(); f.setApprove(false); f.module.registerWindowCommands();
+  await f.module.windowLifecycleReady();
+  f.hooks.quit({ requestId: 'install-cancelled', purpose: 'installUpdate' });
+  await tick();
+  assert.deepEqual(f.confirmations, ['window.installDirtyConfirm']);
+  assert.equal(f.calls.includes('destroy'), false);
+  assert.equal(f.root.inert, false);
+  assert.ok(f.calls.some((c) => Array.isArray(c) && c[0] === 'reply' && c[1] === 'install-cancelled' && c[2] === false));
+});
+await check('installation settings failure reports the install context and permits retry', async () => {
+  const f = fixture(); f.failFlush(); f.module.registerWindowCommands();
+  await f.module.windowLifecycleReady();
+  f.hooks.quit({ requestId: 'install-flush-failed', purpose: 'installUpdate' });
+  await tick();
+  assert.ok(f.calls.some((c) => Array.isArray(c) && c[0] === 'alert' && c[1] === 'window.installSettingsFailed'));
+  assert.equal(f.root.inert, false);
+  assert.equal(f.calls.includes('destroy'), false);
+});
+await check('a different quit request cannot replace an active installation vote', async () => {
+  const f = fixture(); f.module.registerWindowCommands();
+  await f.module.windowLifecycleReady();
+  f.hooks.quit({ requestId: 'install-original', purpose: 'installUpdate' });
+  await tick();
+  f.hooks.quit({ requestId: 'quit-unrelated' });
+  await tick();
+  f.hooks.approved({ requestId: 'quit-unrelated' });
+  await tick();
+  assert.equal(f.calls.includes('destroy'), false);
+  assert.equal(f.calls.filter((c) => Array.isArray(c) && c[0] === 'reply').length, 1);
+  f.hooks.cancelled({ requestId: 'quit-unrelated' });
+  assert.equal(f.root.inert, true);
+  f.hooks.cancelled({ requestId: 'install-original', purpose: 'installUpdate' });
+  assert.equal(f.root.inert, false);
 });
 if (checks.length) process.exitCode = 1;

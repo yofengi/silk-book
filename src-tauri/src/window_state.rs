@@ -180,6 +180,26 @@ impl Default for WindowGeometryState {
 }
 
 impl WindowGeometryState {
+    fn persist_window(&self, label: &str) -> Result<()> {
+        let mut store = self
+            .inner
+            .lock()
+            .map_err(|error| AppError::Channel(error.to_string()))?;
+        if !store.remember_size {
+            return Ok(());
+        }
+        let Some(saved) = store.windows.get(label).copied() else {
+            return Ok(());
+        };
+        if let Some(path) = self.path.as_deref() {
+            save(path, saved)?;
+        }
+        // Do not remove live window/restore tracking. Failed installer launches
+        // return to the same windows, which must continue observing sizes.
+        store.latest = saved;
+        Ok(())
+    }
+
     fn close_window(&self, label: &str) -> Result<()> {
         let mut store = self
             .inner
@@ -193,6 +213,42 @@ impl WindowGeometryState {
         }
         Ok(())
     }
+}
+
+/// Platform updaters can exit without Destroyed events. Preserve the current
+/// focused window's geometry while keeping all tracking available on failure.
+pub fn persist_before_install(app: &tauri::AppHandle) -> Result<()> {
+    let state = app.state::<WindowGeometryState>();
+    let focused = app
+        .state::<crate::window::WindowState>()
+        .focused
+        .lock()
+        .map_err(|error| AppError::Channel(error.to_string()))?
+        .clone();
+    let windows = app.webview_windows();
+    let labels: Vec<_> = windows.keys().cloned().collect();
+    if let Some(label) = crate::window::focused_label(&focused, &labels) {
+        if let Some(window) = windows.get(&label) {
+            let observation = (|| -> tauri::Result<Observation> {
+                let size = window.inner_size()?;
+                Ok(Observation {
+                    width: size.width,
+                    height: size.height,
+                    scale_factor: window.scale_factor()?,
+                    minimized: window.is_minimized()?,
+                    maximized: window.is_maximized()?,
+                })
+            })()
+            .map_err(|error| AppError::Channel(error.to_string()))?;
+            state
+                .inner
+                .lock()
+                .map_err(|error| AppError::Channel(error.to_string()))?
+                .observe(&label, observation);
+        }
+        state.persist_window(&label)?;
+    }
+    Ok(())
 }
 
 /// Called while the settings commit lock is held, before all windows receive the snapshot.
@@ -511,6 +567,60 @@ mod tests {
         assert_eq!(store.closed("win-2"), None);
         assert_eq!(store.latest, saved(900.0, 650.0, true));
         assert!(store.windows.is_empty());
+    }
+
+    #[test]
+    fn install_geometry_persistence_keeps_tracking_for_a_failed_installation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("window-state.json");
+        let state = WindowGeometryState {
+            inner: Mutex::new(GeometryStore::default()),
+            path: Some(path.clone()),
+        };
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .register("main", saved(850.0, 600.0, true), false);
+        state.persist_window("main").unwrap();
+        assert_eq!(load(&path).unwrap(), Some(saved(850.0, 600.0, true)));
+        assert!(state.inner.lock().unwrap().windows.contains_key("main"));
+        // An installer launch failure permits further resize and the normal close
+        // path must continue tracking and saving this same live window.
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .observe("main", observation(1100, 760, 1.0, false, false));
+        state.close_window("main").unwrap();
+        assert_eq!(load(&path).unwrap(), Some(saved(1100.0, 760.0, false)));
+    }
+
+    #[test]
+    fn install_geometry_respects_disabled_memory_and_save_failure_retains_tracking() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("window-state.json");
+        let state = WindowGeometryState {
+            inner: Mutex::new(GeometryStore {
+                remember_size: false,
+                ..Default::default()
+            }),
+            path: Some(path.clone()),
+        };
+        state
+            .inner
+            .lock()
+            .unwrap()
+            .register("main", saved(900.0, 650.0, false), false);
+        state.persist_window("main").unwrap();
+        assert!(!path.exists());
+        // Use a directory in place of the destination file to produce a real
+        // atomic write error without depending on host file permissions.
+        std::fs::create_dir(&path).unwrap();
+        state.inner.lock().unwrap().remember_size = true;
+        assert!(state.persist_window("main").is_err());
+        assert!(state.inner.lock().unwrap().windows.contains_key("main"));
+        assert_eq!(state.inner.lock().unwrap().latest, SavedGeometry::default());
     }
 
     #[test]

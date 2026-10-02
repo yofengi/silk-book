@@ -1,6 +1,6 @@
 // Mock IPC：内存文件系统 + 浏览器文件选择器。用于后端未就绪时的开发与浏览器调试。
 import { t } from '../i18n';
-import { validExts, type Eol, type FileStat, type IpcApi, type IpcError, type QuitRequest, type ReadResult, type SettingsChanged } from './types';
+import { validExts, type Eol, type FileStat, type IpcApi, type IpcError, type QuitRequest, type ReadResult, type SettingsChanged, type UpdateTransferState } from './types';
 
 interface MockFile {
   bytes: Uint8Array;
@@ -22,6 +22,10 @@ const quitListeners: ((e: QuitRequest) => void)[] = [];
 const quitApprovedListeners: ((e: QuitRequest) => void)[] = [];
 const quitCancelledListeners: ((e: QuitRequest) => void)[] = [];
 const busListeners = new Map<string, ((payload: unknown) => void)[]>();
+const idleUpdateTransfer = (): UpdateTransferState => ({
+  revision: 0, taskId: null, phase: 'idle', release: null, source: 'manual', mode: 'download-only',
+  downloadedBytes: 0, totalBytes: null, error: null,
+});
 
 function err(kind: string, message: string): IpcError {
   return { kind, message };
@@ -53,9 +57,14 @@ function pickFiles(multiple: boolean, accept: string): Promise<File[]> {
 }
 
 export const mockIpc: IpcApi = {
-  updateInfo: async () => ({ currentVersion: '0.1.0', platform: 'Browser preview', repositoryUrl: 'https://github.com/yofengi/silk-book' }),
+  updateInfo: async () => ({ currentVersion: '0.1.0', platform: 'Browser preview', repositoryUrl: 'https://github.com/yofengi/silk-book', transfer: idleUpdateTransfer() }),
   async checkUpdates() { throw err('unsupported', 'update checking requires the desktop application'); },
   async onUpdatesChecked() { /* 浏览器无后端共享更新事件 */ },
+  updatesTransfer: async () => idleUpdateTransfer(),
+  async downloadUpdate() { throw err('unsupported', 'update downloading requires the desktop application'); },
+  async installUpdate() { throw err('unsupported', 'update installation requires the desktop application'); },
+  async onUpdateTransfer() { /* 浏览器无原生下载进度 */ },
+  async onUpdateReady() { /* 浏览器不自动弹出安装提示 */ },
   async openUpdateLink(target) {
     if (target !== 'repository') throw err('unsupported', 'no release was checked in the browser preview');
     window.open('https://github.com/yofengi/silk-book', '_blank', 'noopener,noreferrer');

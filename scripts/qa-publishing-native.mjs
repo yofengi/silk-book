@@ -108,7 +108,8 @@ try {
       await page.locator('.tb-update').click();
       await page.locator('.update-panel').getByRole('button', { name: '下载更新', exact: true }).waitFor();
       await page.locator('.update-panel').getByRole('button', { name: '忽略这次更新', exact: true }).waitFor();
-      assert.match(await page.locator('.update-notes').innerText(), /透明空窗/);
+      assert.ok(result.release.notes.trim().length > 0);
+      assert.equal(await page.locator('.update-notes').innerText(), result.release.notes);
     } else {
       await page.getByText('当前已是最新版本。', { exact: true }).waitFor({ timeout: 35000 });
     }

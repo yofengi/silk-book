@@ -1,6 +1,6 @@
 # Installer builds
 
-`.github/workflows/build-installers.yml` builds installers on version tags (`v0.1.1`) or a manual Actions run. It has read-only repository permissions and does not create or publish a Release. Maintainers review and upload the resulting files after the build succeeds.
+`.github/workflows/build-installers.yml` builds installers on version tags (`v0.2.0`) or a manual Actions run. It has read-only repository permissions and does not create or publish a Release. Maintainers review and upload the resulting files after the build succeeds.
 
 | Installer | Native runner | Rust target |
 | --- | --- | --- |
@@ -8,22 +8,34 @@
 | macOS Apple Silicon DMG | `macos-15` | `aarch64-apple-darwin` |
 | macOS Intel DMG | `macos-15-intel` | `x86_64-apple-darwin` |
 
-Each job runs the translation and window lifecycle checks, builds with the lockfiles, runs the Rust tests, then uploads its installer and SHA256 checksum. The final `silk-book-installers` artifact contains all three installers, individual `.sha256` files, and a verified `SHA256SUMS.txt`. Artifact retention is 30 days.
+Each job runs the translation and window lifecycle checks, builds with the lockfiles, runs the Rust tests, then uploads its installer and signed updater package. The final `silk-book-installers` artifact contains three installers, two macOS update archives, three detached updater signatures, a verified three-platform `latest.json`, individual binary `.sha256` files, and `SHA256SUMS.txt`. Artifact retention is 30 days.
 
 The release filenames are:
 
 ```text
-silk-book-0.1.1-windows-x64-setup.exe
-silk-book-0.1.1-macos-arm64.dmg
-silk-book-0.1.1-macos-x64.dmg
+silk-book-0.2.0-windows-x64-setup.exe
+silk-book-0.2.0-windows-x64-setup.exe.sig
+silk-book-0.2.0-macos-arm64.dmg
+silk-book-0.2.0-macos-arm64.app.tar.gz
+silk-book-0.2.0-macos-arm64.app.tar.gz.sig
+silk-book-0.2.0-macos-x64.dmg
+silk-book-0.2.0-macos-x64.app.tar.gz
+silk-book-0.2.0-macos-x64.app.tar.gz.sig
+latest.json
 SHA256SUMS.txt
 ```
 
-`scripts/prepare-release-artifact.mjs` reads the version from `package.json` and `tauri.conf.json`, rejects mismatches and ambiguous or empty bundle output, copies the installer under its release filename, and generates its checksum. A tag-triggered run also requires the tag to match the version. The combined checksum step verifies the bytes of every installer against its checksum before writing the list.
+`scripts/prepare-release-artifact.mjs` reads the version from `package.json` and `tauri.conf.json`, rejects mismatches and ambiguous or empty bundle output, copies each package under its release filename, and generates its checksum. A tag-triggered run also requires the tag to match the version. Both staging and aggregation verify updater signatures, including their signed version, against the application's configured public key. The final job verifies every platform before generating the release feed. Notes come from `docs/releases/v<version>.md`.
+
+The repository's `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets are exposed only to the native build step. Keep the corresponding local encrypted key and password in a restricted, Git-ignored backup. Never rotate the key casually: existing clients trust the embedded public key. These updater signatures are separate from Windows Authenticode and Apple code signing/notarization.
+
+Publish the complete artifact set in one Release, including `latest.json` at the version-specific download URL. Running downloads pin that version's feed so a later release does not change the selected installer. Only mark a release latest after all three platforms and signatures have passed verification.
 
 ## Local commands
 
 Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/), the pnpm version from `package.json`, Node.js 22, and Rust stable. Run macOS builds on macOS.
+
+Signed local bundles also require `TAURI_SIGNING_PRIVATE_KEY` (key contents or the supported private key path) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the build environment. `tauri build` signs with the configured application version automatically. For development without installer output, use `pnpm tauri dev` or `pnpm tauri build --no-bundle`.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -50,6 +62,10 @@ node --test scripts/prepare-release-artifact.test.mjs
 With Playwright available through `QA_PLAYWRIGHT`, run `node scripts/qa-startup-native.mjs` against the built release executable. It launches with an isolated profile and records Win32 visibility, window rectangles, and frontend readiness in `artifacts/qa-startup-*`. It refuses to run while another Boshu instance or its debugging port is in use. `QA_STARTUP_CASES=normal,remembered,maximized,memory-off` selects the full startup geometry matrix. `QA_EXECUTABLE` can select another executable; `--baseline` records an older version without requiring the new readiness markers.
 
 The check requires a visible Windows desktop. A DOM toolbar alone is insufficient: hidden windows can already have a mounted editor while their native frame is still being prepared. The assertions therefore use stored frontend readiness marks, the first native visible rectangle, and settled client dimensions.
+
+`scripts/qa-background-update-native.mjs` tests a separately built `0.1.99` QA client against the public signed release. Its Tauri config must use a separate identifier and an `appDirectoriesOverride.cache` inside a disposable artifact directory. It verifies real download progress, shared tasks across two windows, one completion popup, cancellation, and restart cache restoration. It intercepts every quit approval as refusal, so it cannot start the installer. Keep this QA executable separate from published binaries.
+
+The Windows CI job additionally runs `scripts/qa-windows-installer.ps1` on its disposable runner. It verifies silent first install, the updater's `/S /UPDATE /R` path, restart, and settings/document preservation. The script refuses to run outside GitHub Actions because NSIS writes product registrations even when a temporary destination is supplied.
 
 ## macOS configuration
 

@@ -61,6 +61,7 @@ function fixture() {
   const lifecycle = load('src/ui/window.ts', {
     '../core/commands': commands, '../core/settings': settings, '../core/events': events,
     '../editor/document': { baseName: () => 'draft' },
+    '../editor/files': { drainFileOperations: async () => true },
     '../editor/tabs': { listTabs: () => [{ doc: { path: null, dirty: true } }] },
     '../editor/transfer': { cancelOutgoingTransfers: async () => {}, setTransferClosing() {} },
     '../i18n': { t: (key) => key }, '../ipc': { ipc, errorMessage: (error) => error.message },

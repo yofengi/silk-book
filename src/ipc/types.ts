@@ -80,6 +80,8 @@ export interface UpdateInfo {
   repositoryUrl: string;
   /** 新窗口可读取进程缓存，不另发网络请求。 */
   cachedResult?: UpdateCheckResult | null;
+  /** 进程共享下载快照；其中 release 固定为正在下载或已下载的版本。 */
+  transfer: UpdateTransferState;
 }
 
 export interface ReleaseInfo {
@@ -100,11 +102,34 @@ export interface UpdateCheckResult {
 
 export type UpdateLink = 'repository' | 'release' | 'download';
 
+export type UpdateMode = 'download-only' | 'download-and-install';
+
+export interface UpdateTransferState {
+  revision: number;
+  taskId: string | null;
+  phase: 'idle' | 'downloading' | 'verifying' | 'ready' | 'preparingInstall' | 'installing' | 'error';
+  release: ReleaseInfo | null;
+  source: 'manual' | 'automatic';
+  mode: UpdateMode;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  error: IpcError | null;
+}
+
+/** 仅发送给一个窗口；广播或缓存快照不会自动打开完成弹窗。 */
+export interface UpdateReady { taskId: string; revision: number }
+
 export interface IpcApi {
   updateInfo(): Promise<UpdateInfo>;
   /** 后端跨窗口去重并记录检查时间；未到期且无会话缓存时返回 null。 */
   checkUpdates(manual: boolean): Promise<UpdateCheckResult | null>;
   onUpdatesChecked(fn: (result: UpdateCheckResult) => void): Promise<void>;
+  updatesTransfer(): Promise<UpdateTransferState>;
+  downloadUpdate(version: string, mode: UpdateMode): Promise<UpdateTransferState>;
+  /** 用户明确点击后才请求安装投票，下载完成不会调用此命令。 */
+  installUpdate(taskId: string): Promise<void>;
+  onUpdateTransfer(fn: (state: UpdateTransferState) => void): Promise<void>;
+  onUpdateReady(fn: (notice: UpdateReady) => void): Promise<void>;
   /** 后端仅打开固定仓库 / 最近已验证版本页面和对应安装包。 */
   openUpdateLink(target: UpdateLink, version?: string): Promise<void>;
   fileStat(path: string): Promise<FileStat>;
@@ -215,7 +240,7 @@ export interface SettingsSnapshot {
   revision: number;
 }
 
-export interface QuitRequest { requestId: string }
+export interface QuitRequest { requestId: string; purpose?: 'quit' | 'installUpdate' }
 
 export interface TransferStatus {
   state: 'pending' | 'taken' | 'accepted' | 'missing';

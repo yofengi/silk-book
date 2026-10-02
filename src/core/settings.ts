@@ -8,6 +8,8 @@ export const settingsSchema = {
   'updates.intervalHours': { type: 'number', default: 24, values: [1, 24, 168, 720] },
   'updates.lastCheckedAt': { type: 'number', default: 0 },
   'updates.ignoredVersion': { type: 'string', default: '' as string },
+  'updates.autoDownload': { type: 'boolean', default: false },
+  'updates.manualMode': { type: 'string', default: 'download-only' as string, values: ['download-only', 'download-and-install'] },
   'files.largeFileThreshold': { type: 'number', default: 10 * MB },
   'files.hugeFileThreshold': { type: 'number', default: 100 * MB },
   'files.readChunkSize': { type: 'number', default: 4 * MB },

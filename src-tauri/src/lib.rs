@@ -11,6 +11,7 @@ pub mod settings;
 pub mod startup;
 pub mod system;
 pub mod themes;
+pub mod update_transfer;
 pub mod updates;
 pub mod window;
 pub mod window_state;
@@ -44,6 +45,7 @@ pub fn run() {
         .manage(commands::file::ReadRegistry::default())
         .manage(settings::SettingsState::default())
         .manage(updates::UpdateState::default())
+        .manage(update_transfer::TransferState::default())
         .manage(window_state::WindowGeometryState::default())
         .manage(startup::StartupState::default())
         .manage(state)
@@ -109,12 +111,17 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_opener::Builder::new()
                 .open_js_links_on_click(false)
                 .build(),
         )
         .setup(|app| {
+            let updater_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                update_transfer::restore_once(&updater_app).await;
+            });
             let result = (|| -> std::result::Result<(), Box<dyn std::error::Error>> {
                 for window in app.webview_windows().values() {
                     app.state::<startup::StartupState>()
@@ -150,6 +157,9 @@ pub fn run() {
             updates::updates_info,
             updates::updates_check,
             updates::updates_open,
+            update_transfer::updates_transfer,
+            update_transfer::updates_download,
+            update_transfer::updates_install,
             commands::os::os_build,
             commands::resources::bundled_fonts,
             commands::fonts::list_system_fonts,

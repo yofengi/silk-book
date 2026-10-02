@@ -8,6 +8,8 @@ export interface EventMap {
   'settings.changed': { key: string };
   /** 更新检查状态、已验证 Release 或忽略版本变化。 */
   'updates.changed': undefined;
+  /** 原生定向完成通知；仅消费一次，不由缓存快照派生。 */
+  'updates.ready': { taskId: string };
   'recent.changed': undefined;
   'theme.changed': { kind: 'light' | 'dark' };
   'keybindings.changed': undefined;

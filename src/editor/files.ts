@@ -1,5 +1,6 @@
 // 文件打开/保存/最近文件的业务逻辑（由命令调用，UI 不直接调用）
 import { events } from '../core/events';
+import { isCommandExecutionBlocked } from '../core/commands';
 import { getSetting, setSetting } from '../core/settings';
 import { t } from '../i18n';
 import { errorMessage, ipc, isIpcError } from '../ipc';
@@ -43,15 +44,43 @@ export function setProgressHost(el: HTMLElement): void {
 interface Loaded { text: Text; info: Partial<DocumentInfo> }
 type FileDefaults = Pick<DocumentInfo, 'encoding' | 'hasBom' | 'eol'>;
 const operations = new WeakMap<Tab, Promise<boolean>>();
+const pendingOperations = new Map<Promise<boolean>, boolean>();
 const opening = new Map<string, Promise<Tab | undefined>>();
 
 /** 同一文档的磁盘操作按请求顺序完成，避免后发保存/重读被较慢的旧请求覆盖。 */
-function sequenceOperation(tab: Tab, run: () => Promise<boolean>): Promise<boolean> {
+function sequenceOperation(tab: Tab, run: () => Promise<boolean>, saving = false): Promise<boolean> {
+  // An earlier asynchronous command (for example encoding discovery) may reach
+  // this entry after the lifecycle gate closed. Already queued operations finish.
+  if (isCommandExecutionBlocked()) return Promise.resolve(false);
   const previous = operations.get(tab);
   const current = previous ? previous.catch(() => false).then(run) : run();
   operations.set(tab, current);
-  void current.finally(() => { if (operations.get(tab) === current) operations.delete(tab); }).catch(() => {});
+  pendingOperations.set(current, saving);
+  void current.finally(() => {
+    if (operations.get(tab) === current) operations.delete(tab);
+    pendingOperations.delete(current);
+  }).catch(() => {});
   return current;
+}
+
+/** Wait for queued disk work before inspecting dirty tabs or exiting the process. */
+export async function drainFileOperations(): Promise<boolean> {
+  let saved = true;
+  // Reloads can replace a document and opens can add tabs; include them so the
+  // dirty snapshot cannot be invalidated after confirmation. A queued save also
+  // waits for the reload ahead of it. Only a failed/cancelled save vetoes exit.
+  while (pendingOperations.size || opening.size) {
+    const work = [...pendingOperations].map(async ([operation, saving]) => {
+      try {
+        const completed = await operation;
+        return !saving || completed;
+      }
+      catch { return !saving; }
+    });
+    work.push(...[...opening.values()].map(operation => operation.then(() => true, () => true)));
+    if ((await Promise.all(work)).some(result => !result)) saved = false;
+  }
+  return saved;
 }
 
 /**
@@ -170,7 +199,7 @@ async function reloadNow(tab: Tab, encoding?: string): Promise<boolean> {
 }
 
 export function saveTab(tab: Tab, saveAs = false, override?: { encoding: string; hasBom: boolean }): Promise<boolean> {
-  return sequenceOperation(tab, () => saveNow(tab, saveAs, override));
+  return sequenceOperation(tab, () => saveNow(tab, saveAs, override), true);
 }
 
 async function saveNow(tab: Tab, saveAs: boolean, override?: { encoding: string; hasBom: boolean }): Promise<boolean> {

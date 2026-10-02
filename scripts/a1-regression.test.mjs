@@ -358,6 +358,7 @@ async function windowHarness({ cancelTransfers = async () => {}, confirm = async
     },
     '../core/settings': { flushSettings: async () => { calls.push('flush'); } },
     '../editor/document': { baseName: () => 'draft' },
+    '../editor/files': { drainFileOperations: async () => true },
     '../editor/tabs': { listTabs: () => tabs },
     '../editor/transfer': {
       cancelOutgoingTransfers: () => cancelTransfers(tabs),

@@ -4,6 +4,9 @@
 .about-github { display: grid; place-items: center; width: 38px; height: 36px; padding: 0; }
 .about-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .about-actions:empty { display: none; }
+.about-update-error { color: var(--tok-invalid, #c33); line-height: 1.5; }
+.about-update-error[hidden] { display: none; }
+.st-about .update-progress { max-width: 500px; }
 .about-last-checked { margin: 10px 0; }
 .about-notes { margin-top: 18px; }
 .about-notes h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
