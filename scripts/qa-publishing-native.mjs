@@ -44,6 +44,10 @@ async function launch() {
   page = context.pages()[0];
   page.on('pageerror', error => errors.push(error.message));
   await page.waitForSelector('[role=toolbar]');
+  // v0.1.0 predates the handshake; newer windows mount their DOM while still hidden.
+  if (expectedAppVersion !== '0.1.0') {
+    await page.waitForFunction(() => window.document.documentElement.dataset.startup === 'ready');
+  }
 }
 async function closeAll() {
   if (!context) return;

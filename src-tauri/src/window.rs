@@ -375,6 +375,7 @@ pub fn create_window(
         }
         votes.creating.insert(label.clone());
     }
+    let mut keep_failed_window = false;
     let result = (|| -> Result<()> {
         app.state::<crate::startup::StartupState>()
             .register(&label)?;
@@ -399,7 +400,21 @@ pub fn create_window(
         let window = builder
             .build()
             .map_err(|err| AppError::Channel(err.to_string()))?;
+        // Builder sizes already use the intended shadow insets, so no second set_size
+        // is needed. Normalize the hidden client frame before its frontend lays out.
         crate::startup::watch(&window);
+        if let Err(error) = crate::window_state::prepare_hidden_frame(&window) {
+            if let Err(destroy_error) = window.destroy() {
+                // Keep this window tracked until its visible error fallback is closed.
+                // The existing watchdog remains installed if reporting itself fails.
+                keep_failed_window = true;
+                let message = format!(
+                    "silk book could not prepare this window / 无法初始化此窗口\n{error}\n{destroy_error}"
+                );
+                let _ = app.run_on_main_thread(move || crate::startup::fail(&window, &message));
+            }
+            return Err(AppError::Channel(error.to_string()));
+        }
         Ok(())
     })();
     let cancelled = state.quit.lock().ok().and_then(|mut votes| {
@@ -417,7 +432,9 @@ pub fn create_window(
         let _ = app.emit("quit-cancelled", request);
     }
     if let Err(err) = result {
-        app.state::<crate::startup::StartupState>().closed(&label);
+        if !keep_failed_window {
+            app.state::<crate::startup::StartupState>().closed(&label);
+        }
         if let Ok(mut pending) = state.pending.lock() {
             pending.remove(&label);
         }

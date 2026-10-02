@@ -45,6 +45,12 @@ For Intel macOS, replace the target with `x86_64-apple-darwin` and the script ar
 node --test scripts/prepare-release-artifact.test.mjs
 ```
 
+## Windows startup regression check
+
+With Playwright available through `QA_PLAYWRIGHT`, run `node scripts/qa-startup-native.mjs` against the built release executable. It launches with an isolated profile and records Win32 visibility, window rectangles, and frontend readiness in `artifacts/qa-startup-*`. It refuses to run while another Boshu instance or its debugging port is in use. `QA_STARTUP_CASES=normal,remembered,maximized,memory-off` selects the full startup geometry matrix. `QA_EXECUTABLE` can select another executable; `--baseline` records an older version without requiring the new readiness markers.
+
+The check requires a visible Windows desktop. A DOM toolbar alone is insufficient: hidden windows can already have a mounted editor while their native frame is still being prepared. The assertions therefore use stored frontend readiness marks, the first native visible rectangle, and settled client dimensions.
+
 ## macOS configuration
 
 Tauri automatically merges `src-tauri/tauri.macos.conf.json`. It enables the transparent-window API, bundles the existing icon as ICNS and PNG, uses a minimum macOS version of 11.0, and uses the ad-hoc signing identity `-`. No Apple certificate or notarization credentials are needed for this configuration. Ad-hoc signing is not Apple notarization; downloaded apps can require approval in Privacy & Security. See [Tauri's signing guide](https://v2.tauri.app/distribute/sign/macos/).
