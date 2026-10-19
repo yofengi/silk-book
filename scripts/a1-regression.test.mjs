@@ -128,6 +128,13 @@ async function filesHarness({ ipc: overrides = {}, tabs: tabOverrides = {}, doc 
     './encodings': { defaultEncoding: () => ({ encoding: 'UTF-8', hasBom: false }), defaultEol: () => 'CRLF', encodingName: (encoding) => encoding },
     './tabs': {
       activateTab() {}, findTabByPath() {}, openTab() {},
+      activeSpecial: () => undefined,
+      activeTab: () => tab,
+      allTabIds: () => [tab.id],
+      isPristineUntitled: entry => entry === tab && entry.doc.path === null && entry.state.doc.length === 0 && !entry.doc.dirty && !entry.metaDirty,
+      tabRevision: () => 0,
+      moveTab: () => { throw new Error('unexpected tab placement'); },
+      reuseUntitled: () => { throw new Error('unexpected untitled reuse'); },
       tabText: (t) => t.state.doc.toString(),
       markSaved: (...args) => { marks.push(args); },
       replaceTabContent: (...args) => { replacements.push(args); },
