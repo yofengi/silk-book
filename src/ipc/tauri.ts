@@ -107,6 +107,16 @@ export const tauriIpc: Omit<IpcApi, 'confirm'> = {
     // 后端 emit_to(webview_window(focused))；须按本窗口 target 监听，否则每个窗口都会收到
     await listenSelf<string[]>('open-files', (p) => { if (Array.isArray(p)) fn(p); });
   },
+  async onFileDrop(fn) {
+    await self().onDragDropEvent(({ payload }) => {
+      if (payload.type === 'leave') { fn({ type: 'leave' }); return; }
+      const ratio = window.devicePixelRatio;
+      const scale = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+      const position = { x: payload.position.x / scale, y: payload.position.y / scale };
+      if (payload.type === 'over') fn({ type: 'over', position });
+      else fn({ type: payload.type, paths: [...payload.paths], position });
+    });
+  },
   themesList: () => invoke<ThemeEntry[]>('themes_list'),
   themeImport: (sourcePath) => invoke<ImportedTheme>('theme_import', { sourcePath }),
   themeDelete: (id) => invoke<void>('theme_delete', { id }),

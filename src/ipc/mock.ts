@@ -164,6 +164,7 @@ export const mockIpc: Omit<IpcApi, 'confirm'> = {
   async fileAssocUnregister(exts) { for (const e of validExts(exts)) mockAssoc.delete(e); },
   async openDefaultAppsSettings() { /* 浏览器无系统设置 */ },
   async onOpenFiles() { /* 无第二实例 */ },
+  async onFileDrop() { /* 浏览器无原生文件拖放事件 */ },
   async themesList() {
     return [...mockThemes].map(([id, json]) => ({ id, fileName: `${id}.json`, json }));
   },

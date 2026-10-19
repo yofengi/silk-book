@@ -10,9 +10,9 @@ import { loadSettings, watchSettings } from './core/settings';
 import { startUpdateService } from './core/updates';
 import { revealStartupWindow } from './core/startup';
 import { registerEditorCommands } from './editor/commands';
-import { setProgressHost } from './editor/files';
+import { isReusableUntitled, newUntitled, setProgressHost } from './editor/files';
 import { loadAnsi } from './editor/encodings';
-import { mountEditor } from './editor/tabs';
+import { closeTab, mountEditor, type Tab } from './editor/tabs';
 import { installIncomingTransferListener, receiveTransferredTab } from './editor/transfer';
 import { productName } from './i18n';
 import { initLanguage } from './i18n/boot';
@@ -26,11 +26,10 @@ import { registerThemeCommands } from './themes/commands';
 import { installFontWatcher } from './themes/fonts';
 
 /** 依次打开（file.open 内部按路径去重，已打开的只激活） */
-async function openAll(paths: string[], hereFirst = true): Promise<void> {
+async function openAll(paths: string[], hereFirst = true, reuseTab?: Tab): Promise<void> {
   for (const [index, p] of paths.entries()) {
     try {
-      // A quit vote can freeze this newly initialized window. Cancellation must not lose
-      // its startup/second-instance files while executeCommand is deliberately blocked.
+      // 退出投票期间保留待打开文件。
       while (isCommandExecutionBlocked()) {
         await new Promise<void>((resolve) => {
           const unbind = events.on('commands.executionChanged', ({ blocked }) => {
@@ -39,7 +38,7 @@ async function openAll(paths: string[], hereFirst = true): Promise<void> {
         });
       }
       // 本窗接收首个启动文件；后续文件沿用打开偏好，避免再次转发首个文件。
-      await executeCommand('file.open', { paths: [p], here: hereFirst && index === 0 });
+      await executeCommand('file.open', { paths: [p], here: hereFirst && index === 0, reuseTab });
     } catch (e) {
       console.error('open failed', p, e);
     }
@@ -61,9 +60,10 @@ export async function start(): Promise<void> {
   registerEditorCommands();
   const root = document.getElementById('app');
   if (!root) throw new Error('#app not found');
-  const { editorHost, previewHost, overlayHost, specialHost } = mountUI(root);
+  const { editorHost, previewHost, overlayHost, specialHost, fileDropReady } = mountUI(root);
   setProgressHost(overlayHost);
   mountEditor(editorHost);
+  const startupTab = newUntitled();
   registerMarkdownCommands(previewHost);
   registerThemeCommands();
   registerSettingsCommands(specialHost);
@@ -75,10 +75,14 @@ export async function start(): Promise<void> {
   // 先订阅第二实例的 open-files，再取本窗口的启动数据；后端会暂存尚未初始化窗口的文件。
   let shown!: () => void;
   const visible = new Promise<void>((resolve) => { shown = resolve; });
-  await ipc.onOpenFiles((paths) => { void visible.then(() => openAll(paths)); });
+  await ipc.onOpenFiles((paths) => { void visible.then(() => openAll(paths, true, startupTab)); });
+  await fileDropReady;
   await revealStartupWindow();
   shown();
   const initial = await ipc.windowInit();
-  if (initial.transferToken) await receiveTransferredTab(initial.transferToken);
-  await openAll(initial.files, !initial.transferToken);
+  if (initial.transferToken) {
+    const transferred = await receiveTransferredTab(initial.transferToken);
+    if (transferred && isReusableUntitled(startupTab)) closeTab(startupTab.id);
+  }
+  await openAll(initial.files, !initial.transferToken, startupTab);
 }

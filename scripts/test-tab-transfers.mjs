@@ -122,7 +122,7 @@ function openFixture() {
     '../core/keybindings': { registerKeybinding() {} },
     '../core/settings': { getSetting: (key) => key === 'window.openFilesInNewWindow' ? newWindows : false },
     '../i18n': { t: (key) => key }, '../ipc': { ipc },
-    './document': {}, './files': { openPath: async (path) => local.push(path) },
+    './document': {}, './files': { openPath: async (path) => local.push(path), trackOpenBatch: task => task },
     './encodings': {}, './languages': {}, '../ui/palette': {}, './tabs': {}, './transfer': {},
   }).registerEditorCommands();
   return { commands, ipc, windows, local, disablePreference: () => { newWindows = false; } };

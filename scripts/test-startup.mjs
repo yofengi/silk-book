@@ -50,6 +50,17 @@ class Element {
 
 function fixture(options = {}) {
   const calls = [], marks = [], frames = [];
+  const tabs = [];
+  const openRequests = [];
+  let active;
+  let tabSequence = 0;
+  const makeTab = (path = null, text = '') => {
+    const tab = { id: `tab-${++tabSequence}`, doc: { path, dirty: false }, text };
+    tabs.push(tab);
+    active = tab;
+    return tab;
+  };
+  const pristine = tab => tabs.includes(tab) && tab.doc.path === null && !tab.doc.dirty && tab.text === '';
   let visible = false;
   const root = new Element('app');
   const document = {
@@ -66,11 +77,21 @@ function fixture(options = {}) {
   commands.registerCommand({ id: 'file.open', title: 'Open', run: async (_ctx, args) => {
     assert.equal(visible, true, 'file reads/dialogs must start after native show succeeds');
     calls.push(['open', args.paths]);
-    return options.fileTask;
+    openRequests.push(args);
+    await options.fileTask;
+    if (options.failFiles) return;
+    if (args.reuseTab && pristine(args.reuseTab)) {
+      active = args.reuseTab;
+      active.doc.path = args.paths[0];
+      active.text = 'disk content';
+    } else makeTab(args.paths[0], 'disk content');
   } });
+  commands.registerCommand({ id: 'file.save', title: 'Save', when: () => !!active,
+    run: () => { calls.push(['save', active]); } });
   let onOpenFiles;
   const ipc = {
     windowReady: async () => {
+      options.beforeShow?.(tabs);
       calls.push('show-request');
       await options.ready;
       visible = true;
@@ -98,23 +119,39 @@ function fixture(options = {}) {
       watchSettings: async () => { calls.push('settings-listener'); },
     },
     './core/updates': { startUpdateService() {} }, './core/startup': startup,
-    './editor/commands': { registerEditorCommands() {} }, './editor/files': { setProgressHost() {} },
+    './editor/commands': { registerEditorCommands() {} }, './editor/files': {
+      setProgressHost() {}, isReusableUntitled: tab => pristine(tab) && !tab.busy,
+      newUntitled: () => { calls.push('new-untitled'); return makeTab(); },
+    },
     './editor/encodings': { loadAnsi: async () => calls.push('ansi') },
-    './editor/tabs': { mountEditor: () => calls.push('editor') },
+    './editor/tabs': {
+      mountEditor: () => calls.push('editor'), listTabs: () => tabs,
+      closeTab: id => { const index = tabs.findIndex(tab => tab.id === id); if (index >= 0) tabs.splice(index, 1); },
+    },
     './editor/transfer': {
       installIncomingTransferListener: async () => calls.push('transfer-listener'),
-      receiveTransferredTab: async () => { assert.equal(visible, true); calls.push('transfer'); },
+      receiveTransferredTab: async () => {
+        assert.equal(visible, true); calls.push('transfer'); await options.transferTask;
+        return options.failTransfer ? undefined : makeTab(null, 'transferred draft');
+      },
     },
     './i18n': i18n,
     './i18n/boot': { initLanguage: async () => { calls.push('language'); await options.language; } },
     './ipc': { ipc }, './markdown/controller': { registerMarkdownCommands() {} },
     './settings/controller': { registerSettingsCommands() {} },
-    './ui': { mountUI: () => { calls.push('ui'); return { editorHost: {}, previewHost: {}, overlayHost: {}, specialHost: {} }; } },
+    './ui': { mountUI: () => { calls.push('ui'); return {
+      editorHost: {}, previewHost: {}, overlayHost: {}, specialHost: {}, fileDropReady: options.fileDropReady ?? Promise.resolve(),
+    }; } },
     './ui/window': { windowLifecycleReady: async () => { calls.push('close-listener'); await options.lifecycle; } },
     './themes': { installThemeWatcher: async () => { calls.push('theme'); await options.theme; } },
     './themes/commands': { registerThemeCommands() {} }, './themes/fonts': { installFontWatcher() {} },
   }, globals);
-  return { main, startup, globals, commands, calls, marks, frames, document, ipc, visible: () => visible, openFiles: (paths) => onOpenFiles(paths) };
+  return {
+    main, startup, globals, commands, calls, marks, frames, document, ipc, tabs, openRequests,
+    edit: text => { assert.ok(active, 'typing must have an owned document'); active.text = text; active.doc.dirty = true; },
+    beginSave: () => { assert.ok(active); active.busy = true; },
+    visible: () => visible, openFiles: (paths) => onOpenFiles(paths),
+  };
 }
 
 const failures = [];
@@ -148,6 +185,33 @@ await check('hidden WebViews without RAF still reach show through the bounded fa
   assert.equal(f.visible(), true);
 });
 
+await check('ordinary startup owns a saveable untitled document before the first show', async () => {
+  const f = fixture({ beforeShow: tabs => assert.equal(tabs.length, 1, 'show must not expose an orphan placeholder') });
+  await f.main.start();
+  assert.equal(f.tabs.length, 1);
+  assert.equal(f.tabs[0].doc.path, null);
+  assert.ok(f.calls.indexOf('new-untitled') < f.calls.indexOf('show-request'));
+  f.edit('text typed immediately after startup');
+  assert.equal(f.commands.isEnabled('file.save'), true);
+  await f.commands.executeCommand('file.save');
+  const saved = f.calls.find(call => Array.isArray(call) && call[0] === 'save');
+  assert.equal(saved[1], f.tabs[0]);
+  assert.equal(saved[1].text, 'text typed immediately after startup');
+});
+
+await check('native file-drop subscription is ready before the window is shown', async () => {
+  const dropReady = deferred();
+  const f = fixture({ fileDropReady: dropReady.promise });
+  const started = f.main.start();
+  await until(() => f.calls.includes('file-listener'));
+  await tick();
+  assert.equal(f.frames.length, 0, 'the first paint must wait for the drop listener');
+  assert.equal(f.calls.includes('show-request'), false);
+  dropReady.resolve();
+  await started;
+  assert.equal(f.visible(), true);
+});
+
 await check('two available animation frames can complete without waiting for the fallback', async () => {
   const f = fixture();
   const paint = f.startup.paintOpportunity();
@@ -168,6 +232,107 @@ await check('initial large-file work starts after visible first screen', async (
   assert.ok(f.marks.includes('startup:window-shown'));
   file.resolve();
   await started;
+});
+
+await check('startup and second-instance files reuse only the initial pristine document', async () => {
+  const f = fixture({ initial: { files: ['one.txt', 'two.txt'] } });
+  await f.main.start();
+  assert.equal(f.tabs.length, 2, 'startup files must not leave a spare untitled tab');
+  assert.deepEqual(f.tabs.map(tab => tab.doc.path), ['one.txt', 'two.txt']);
+  assert.equal(f.openRequests[0].reuseTab, f.tabs[0]);
+  f.openFiles(['third.txt']);
+  await until(() => f.tabs.some(tab => tab.doc.path === 'third.txt'));
+  assert.deepEqual(f.tabs.map(tab => tab.doc.path), ['one.txt', 'two.txt', 'third.txt']);
+  const second = fixture();
+  await second.main.start();
+  const initialTab = second.tabs[0];
+  second.openFiles(['second-instance.txt']);
+  await until(() => second.tabs.some(tab => tab.doc.path === 'second-instance.txt'));
+  assert.equal(second.tabs.length, 1);
+  assert.equal(second.tabs[0], initialTab);
+});
+
+await check('typing during a startup file read keeps the draft beside the loaded file', async () => {
+  const file = deferred();
+  const f = fixture({ initial: { files: ['slow.txt'] }, fileTask: file.promise });
+  const started = f.main.start();
+  await until(() => f.openRequests.length === 1);
+  f.edit('keep the startup draft');
+  file.resolve();
+  await started;
+  assert.equal(f.tabs.length, 2);
+  assert.equal(f.tabs[0].doc.path, null);
+  assert.equal(f.tabs[0].text, 'keep the startup draft');
+  assert.equal(f.tabs[1].doc.path, 'slow.txt');
+});
+
+await check('successful initial transfers remove only the untouched startup blank', async () => {
+  const f = fixture({ initial: { files: [], transferToken: 'draft' } });
+  await f.main.start();
+  assert.equal(f.tabs.length, 1);
+  assert.equal(f.tabs[0].text, 'transferred draft');
+});
+
+await check('initial transfer and startup files keep their documents without a spare blank', async () => {
+  const f = fixture({ initial: { files: ['alongside.txt'], transferToken: 'draft' } });
+  await f.main.start();
+  assert.equal(f.tabs.length, 2);
+  assert.equal(f.tabs[0].text, 'transferred draft');
+  assert.equal(f.tabs[1].doc.path, 'alongside.txt');
+  assert.equal(f.openRequests[0].here, false, 'transfer windows retain the existing later-file window preference');
+});
+
+await check('typing during an initial transfer retains both real documents', async () => {
+  const transfer = deferred();
+  const f = fixture({ initial: { files: [], transferToken: 'draft' }, transferTask: transfer.promise });
+  const started = f.main.start();
+  await until(() => f.calls.includes('transfer'));
+  f.edit('keep typing during transfer');
+  transfer.resolve();
+  await started;
+  assert.equal(f.tabs.length, 2);
+  assert.equal(f.tabs[0].text, 'keep typing during transfer');
+  assert.equal(f.tabs[1].text, 'transferred draft');
+});
+
+await check('an initial transfer preserves the startup tab with a pending Save As operation', async () => {
+  const transfer = deferred();
+  const f = fixture({ initial: { files: [], transferToken: 'draft' }, transferTask: transfer.promise });
+  const started = f.main.start();
+  await until(() => f.calls.includes('transfer'));
+  const startupTab = f.tabs[0];
+  f.beginSave();
+  transfer.resolve();
+  await started;
+  assert.equal(f.tabs.length, 2);
+  assert.equal(f.tabs[0], startupTab);
+  assert.equal(f.tabs[1].text, 'transferred draft');
+});
+
+await check('failed native drop initialization uses the explicit startup error path', async () => {
+  const dropReady = deferred();
+  const f = fixture({ fileDropReady: dropReady.promise });
+  const started = f.main.start().catch(f.startup.failStartup);
+  await until(() => f.calls.includes('file-listener'));
+  dropReady.reject(Error('file drop listener failed'));
+  await started;
+  assert.equal(f.calls.includes('show-request'), false);
+  assert.equal(f.calls.includes('failure-visible'), true);
+  assert.equal(f.document.documentElement.dataset.startup, 'failed');
+});
+
+await check('failed startup file reads and rejected transfers keep a usable untitled document', async () => {
+  for (const options of [
+    { initial: { files: ['missing.txt'] }, failFiles: true },
+    { initial: { files: [], transferToken: 'rejected' }, failTransfer: true },
+  ]) {
+    const f = fixture(options);
+    await f.main.start();
+    assert.equal(f.tabs.length, 1);
+    assert.equal(f.tabs[0].doc.path, null);
+    f.edit('still saveable');
+    assert.equal(f.commands.isEnabled('file.save'), true);
+  }
 });
 
 await check('second-instance files and initial transferred drafts cannot run while show is pending', async () => {

@@ -43,9 +43,10 @@ const order: string[] = [];
 let activeId: string | null = null;
 let view: EditorView | null = null;
 let seq = 0;
+const revisions = new WeakMap<Tab, number>();
 
 export function mountEditor(parent: HTMLElement): void {
-  const placeholder = createState('', { minimap: false, wordCompletion: false, lineWrap: false }, 4, EditorView.editable.of(false));
+  const placeholder = createState('', { minimap: false, wordCompletion: false, lineWrap: false }, 4, [EditorView.editable.of(false), EditorState.readOnly.of(true)]);
   view = createView(parent, placeholder);
   // 主题切换：对所有标签页的 state 下发 theme Compartment reconfigure，不重建 view
   const refreshTheme = () => {
@@ -100,6 +101,19 @@ export function activeTab(): Tab | undefined {
   return tabs.find((t) => t.id === activeId);
 }
 
+export function isPristineUntitled(tab: Tab): boolean {
+  if (tab.id === activeId && view) tab.state = view.state;
+  return tabs.includes(tab) && tab.doc.path === null && tab.state.doc.length === 0 && !tab.doc.dirty && !tab.metaDirty;
+}
+
+export function tabRevision(tab: Tab): number {
+  return revisions.get(tab) ?? 0;
+}
+
+function bumpRevision(tab: Tab): void {
+  revisions.set(tab, tabRevision(tab) + 1);
+}
+
 export function listSpecialTabs(): readonly SpecialTab[] {
   return specials;
 }
@@ -150,6 +164,7 @@ function dirtyTracker(id: string) {
     const t = tabs.find((x) => x.id === id);
     if (!t) return;
     t.state = u.state;
+    bumpRevision(t);
     events.emit('doc.changed', { id });
     const dirty = !!t.metaDirty || !u.state.doc.eq(t.savedDoc);
     if (dirty !== t.doc.dirty) {
@@ -226,7 +241,7 @@ export function activateTab(id: string | null): void {
       refreshSearchPanel(view);
       view.focus();
     } else {
-      view.setState(createState('', { minimap: false, wordCompletion: false, lineWrap: false }, 4, EditorView.editable.of(false)));
+      view.setState(createState('', { minimap: false, wordCompletion: false, lineWrap: false }, 4, [EditorView.editable.of(false), EditorState.readOnly.of(true)]));
     }
   }
   events.emit('tab.activated', { id: activeId });
@@ -300,6 +315,7 @@ export type SavedMetadata = Pick<DocumentInfo, 'encoding' | 'eol' | 'hasBom' | '
 
 /** 以实际写入磁盘的快照为 baseline；异步保存期间的新编辑与元数据修改必须仍为 dirty。 */
 export function markSaved(tab: Tab, patch: Partial<DocumentInfo>, savedDoc?: Text, savedMeta?: SavedMetadata): void {
+  bumpRevision(tab);
   if (tab.id === activeId && view) tab.state = view.state;
   tab.savedDoc = savedDoc ?? tab.state.doc;
   const pathChanged = patch.path !== undefined && patch.path !== tab.doc.path;
@@ -337,6 +353,7 @@ function refreshSearchPanel(editor: EditorView): void {
 
 /** 修改文档元数据（如换行符）；markDirty 时标记未保存 */
 export function updateDocInfo(tab: Tab, patch: Partial<DocumentInfo>, markDirty: boolean): void {
+  bumpRevision(tab);
   Object.assign(tab.doc, patch);
   if (markDirty) { tab.metaDirty = true; tab.doc.dirty = true; }
   events.emit('tab.changed', { id: tab.id });
@@ -348,4 +365,21 @@ export function replaceTabContent(tab: Tab, text: Text, patch: Partial<DocumentI
   if (tab.id === activeId && view) { view.dispatch(tx); tab.state = view.state; }
   else tab.state = tab.state.update(tx).state;
   markSaved(tab, patch);
+}
+
+export function reuseUntitled(tab: Tab, text: Text, info: Partial<DocumentInfo>, flagsOverride?: Partial<FeatureFlags>): void {
+  const flags = { ...tab.flags, ...flagsOverride };
+  const doc = createDocument(info);
+  const state = createState(text, flags, getSetting('editor.tabSize'), [dirtyTracker(tab.id), largeFileExtensions(doc.tier)]);
+  bumpRevision(tab);
+  tab.doc = doc;
+  tab.flags = flags;
+  tab.state = state;
+  tab.savedDoc = state.doc;
+  tab.metaDirty = false;
+  if (tab.id === activeId && view) view.setState(state);
+  activateTab(tab.id);
+  const language = languageForPath(doc.path);
+  void applyLanguage(tab, language?.id ?? PLAIN_TEXT.id);
+  events.emit('tab.changed', { id: tab.id });
 }

@@ -59,6 +59,7 @@ jobs:
           pnpm lint
           node scripts/check-i18n.mjs
           node --experimental-vm-modules --test scripts/a1-regression.test.mjs scripts/test-updates.mjs scripts/test-update-download.mjs scripts/test-window-file-drain.mjs scripts/test-confirm-dialog.mjs
+          node --experimental-vm-modules --test scripts/test-file-open-placement.mjs scripts/test-file-drop.mjs scripts/test-file-drop-adapter.mjs
           node scripts/test-window-flows.mjs
           node scripts/test-command-freeze.mjs
           node scripts/test-startup.mjs

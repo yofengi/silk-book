@@ -6,7 +6,7 @@ import { getSetting, setSetting } from '../core/settings';
 import { t } from '../i18n';
 import { ipc } from '../ipc';
 import { baseName } from './document';
-import { clearRecent, newUntitled, openPath, reloadTab, saveTab } from './files';
+import { clearRecent, newUntitled, openDroppedPaths, openPath, reloadTab, saveTab, trackOpenBatch } from './files';
 import type { Eol, TransferPlacement } from '../ipc';
 import { loadEncodings, resolveAnsi } from './encodings';
 import { languages } from './languages';
@@ -14,6 +14,7 @@ import { openPicker, openRecentPicker } from '../ui/palette';
 import { isTransferring, moveTabToExistingWindow, moveTabToNewWindow } from './transfer';
 import {
   activateTab, activeSpecial, activeTab, allTabIds, applyLanguage, closeTab, getView, listSpecialTabs, listTabs, moveTab, setFlag, updateDocInfo,
+  type Tab,
 } from './tabs';
 
 const hasTab = () => !!activeTab();
@@ -42,18 +43,19 @@ export function registerEditorCommands(): void {
   registerCommand({ id: 'file.new', title: () => t('cmd.file.new'), run: () => void newUntitled() });
   registerCommand({
     id: 'file.open', title: () => t('cmd.file.open'),
-    run: async (_c, args) => {
-      const opts = args && typeof args === 'object' ? args as { paths?: string[]; here?: boolean } : undefined;
+    run: (_c, args) => trackOpenBatch((async () => {
+      const opts = args && typeof args === 'object' ? args as { paths?: string[]; here?: boolean; drop?: boolean; placement?: TransferPlacement; reuseTab?: Tab } : undefined;
       const paths = typeof args === 'string' ? [args] : opts?.paths ?? await ipc.openDialog({ multiple: true });
       if (!paths.length) return;
+      if (opts?.drop) return openDroppedPaths(paths, opts.placement);
       for (const p of paths) {
         if (!opts?.here && getSetting('window.openFilesInNewWindow')) {
           try { await ipc.windowOpen({ files: [p] }); continue; }
           catch (e) { console.warn('new-window open failed, opening here', e); }
         }
-        await openPath(p);
+        await openPath(p, { reuseTab: opts?.reuseTab, placement: opts?.placement });
       }
-    },
+    })()),
   });
   registerCommand({ id: 'file.openRecent', title: () => t('cmd.file.openRecent'), run: openRecentPicker });
   registerCommand({ id: 'file.save', title: () => t('cmd.file.save'), when: hasTab, run: () => { const t = activeTab(); return t && saveTab(t); } });

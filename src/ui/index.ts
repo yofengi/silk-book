@@ -13,6 +13,7 @@ import { openCommandPalette } from './palette';
 import { mountStatusBar } from './statusbar';
 import { bindWindowState, registerWindowCommands } from './window';
 import { bindTabDragging } from './tab-drag';
+import { bindFileDrop } from './file-drop';
 import { createUpdateButton } from './updates';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -67,6 +68,7 @@ function winButton(command: string, labelKey: Key, icon: string, extra = ''): HT
 }
 
 export interface Layout {
+  fileDropReady: Promise<void>;
   editorHost: HTMLElement;
   previewHost: HTMLElement;
   overlayHost: HTMLElement;
@@ -153,6 +155,7 @@ export function mountUI(root: HTMLElement): Layout {
   const status = mountStatusBar();
 
   root.append(header, work, overlayHost, status);
+  const fileDropReady = bindFileDrop(tabBar);
 
   const renderTabs = () => {
     const nodes = new Map<string, HTMLElement>();
@@ -234,5 +237,5 @@ export function mountUI(root: HTMLElement): Layout {
   applyLabels();
   renderAll();
 
-  return { editorHost, previewHost, overlayHost, specialHost };
+  return { editorHost, previewHost, overlayHost, specialHost, fileDropReady };
 }

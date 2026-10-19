@@ -175,6 +175,7 @@ export interface IpcApi {
   openDefaultAppsSettings(): Promise<void>;
   /** 第二实例传入文件时触发；须在 windowInit 之前订阅 */
   onOpenFiles(fn: (paths: string[]) => void): Promise<void>;
+  onFileDrop(fn: (event: FileDropEvent) => void): Promise<void>;
   themesList(): Promise<ThemeEntry[]>;
   themeImport(sourcePath: string): Promise<ImportedTheme>;
   themeDelete(id: string): Promise<void>;
@@ -220,6 +221,12 @@ export interface WindowInit {
   files: string[];
   transferToken?: string;
 }
+
+/** position 为当前 Webview 客户区 CSS 像素。 */
+export type FileDropEvent =
+  | { type: 'enter' | 'drop'; paths: string[]; position: { x: number; y: number } }
+  | { type: 'over'; position: { x: number; y: number } }
+  | { type: 'leave' };
 
 export interface WindowOpenOptions {
   files?: string[];

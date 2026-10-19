@@ -3,13 +3,13 @@ import { events } from '../core/events';
 import { isCommandExecutionBlocked } from '../core/commands';
 import { getSetting, setSetting } from '../core/settings';
 import { t } from '../i18n';
-import { errorMessage, ipc, isIpcError } from '../ipc';
+import { errorMessage, ipc, isIpcError, type TransferPlacement } from '../ipc';
 import { showProgress, type ProgressHandle } from '../ui/progress';
 import { baseName, pathKey, sizeTier, type DocumentInfo } from './document';
 import { defaultEncoding, defaultEol, encodingName } from './encodings';
 import type { Text } from '@codemirror/state';
 import { LineCollector, tierFlagsOverride } from './large-file';
-import { activateTab, findTabByPath, markSaved, openTab, replaceTabContent, type Tab } from './tabs';
+import { activateTab, activeSpecial, activeTab, allTabIds, findTabByPath, isPristineUntitled, markSaved, moveTab, openTab, replaceTabContent, reuseUntitled, tabRevision, type Tab } from './tabs';
 
 let requestSeq = 0;
 
@@ -46,12 +46,42 @@ type FileDefaults = Pick<DocumentInfo, 'encoding' | 'hasBom' | 'eol'>;
 const operations = new WeakMap<Tab, Promise<boolean>>();
 const pendingOperations = new Map<Promise<boolean>, boolean>();
 const opening = new Map<string, Promise<Tab | undefined>>();
+const openingBatches = new Set<Promise<unknown>>();
+const operationVersions = new WeakMap<Tab, number>();
+
+export interface OpenPathOptions {
+  reuseTab?: Tab;
+  placement?: TransferPlacement;
+}
+
+interface ReuseSnapshot { tab: Tab; revision: number; operationVersion: number }
+interface OpenRequest {
+  reuse?: ReuseSnapshot;
+  placement?: TransferPlacement;
+  afterId?: string;
+  relocateExisting?: boolean;
+  inserted?: (tab: Tab) => void;
+}
+
+export function isReusableUntitled(tab: Tab): boolean {
+  return isPristineUntitled(tab) && !operations.has(tab);
+}
+
+function captureReuse(tab?: Tab): ReuseSnapshot | undefined {
+  return tab && isReusableUntitled(tab)
+    ? { tab, revision: tabRevision(tab), operationVersion: operationVersions.get(tab) ?? 0 } : undefined;
+}
+
+export function trackOpenBatch<T>(operation: Promise<T>): Promise<T> {
+  openingBatches.add(operation);
+  void operation.finally(() => openingBatches.delete(operation)).catch(() => {});
+  return operation;
+}
 
 /** 同一文档的磁盘操作按请求顺序完成，避免后发保存/重读被较慢的旧请求覆盖。 */
 function sequenceOperation(tab: Tab, run: () => Promise<boolean>, saving = false): Promise<boolean> {
-  // An earlier asynchronous command (for example encoding discovery) may reach
-  // this entry after the lifecycle gate closed. Already queued operations finish.
   if (isCommandExecutionBlocked()) return Promise.resolve(false);
+  operationVersions.set(tab, (operationVersions.get(tab) ?? 0) + 1);
   const previous = operations.get(tab);
   const current = previous ? previous.catch(() => false).then(run) : run();
   operations.set(tab, current);
@@ -69,7 +99,7 @@ export async function drainFileOperations(): Promise<boolean> {
   // Reloads can replace a document and opens can add tabs; include them so the
   // dirty snapshot cannot be invalidated after confirmation. A queued save also
   // waits for the reload ahead of it. Only a failed/cancelled save vetoes exit.
-  while (pendingOperations.size || opening.size) {
+  while (pendingOperations.size || opening.size || openingBatches.size) {
     const work = [...pendingOperations].map(async ([operation, saving]) => {
       try {
         const completed = await operation;
@@ -78,6 +108,7 @@ export async function drainFileOperations(): Promise<boolean> {
       catch { return !saving; }
     });
     work.push(...[...opening.values()].map(operation => operation.then(() => true, () => true)));
+    work.push(...[...openingBatches].map(operation => operation.then(() => true, () => true)));
     if ((await Promise.all(work)).some(result => !result)) saved = false;
   }
   return saved;
@@ -135,28 +166,65 @@ async function loadPath(path: string, encoding?: string, fallback?: FileDefaults
 }
 
 /** 按档位读取：Normal/Large 一次读取；Huge 显示进度条且可取消。均按行累积后 Text.of 构建文档 */
-export function openPath(path: string): Promise<Tab | undefined> {
+export function openPath(path: string, options: OpenPathOptions = {}): Promise<Tab | undefined> {
+  return openRequestedPath(path, {
+    reuse: options.placement ? undefined : captureReuse(options.reuseTab),
+    placement: options.placement ? { ...options.placement } : undefined,
+  });
+}
+
+function openRequestedPath(path: string, options: OpenRequest): Promise<Tab | undefined> {
   const existing = findTabByPath(path);
   if (existing) {
+    if (options.relocateExisting) placeOpenedTab(existing, options);
     activateTab(existing.id);
     return Promise.resolve(existing);
   }
   const key = pathKey(path);
   const pending = opening.get(key);
-  if (pending) return pending;
-  const request = openLoaded(path).finally(() => opening.delete(key));
+  if (pending) return options.relocateExisting ? pending.then(tab => {
+    if (tab) placeOpenedTab(tab, options);
+    return tab;
+  }) : pending;
+  const request = openLoaded(path, options).finally(() => opening.delete(key));
   opening.set(key, request);
   return request;
 }
 
-async function openLoaded(path: string): Promise<Tab | undefined> {
+function placeOpenedTab(tab: Tab, options: OpenRequest): void {
+  const ids = allTabIds().filter(id => id !== tab.id);
+  const anchor = options.afterId ? ids.indexOf(options.afterId) : -1;
+  const neighbour = options.placement?.beforeId ? ids.indexOf(options.placement.beforeId) : -1;
+  const index = anchor >= 0 ? anchor + 1 : neighbour >= 0 ? neighbour : options.placement?.index;
+  if (index !== undefined) moveTab(tab.id, index);
+  options.inserted?.(tab);
+}
+
+async function openLoaded(path: string, options: OpenRequest): Promise<Tab | undefined> {
   try {
     const r = await loadPath(path);
     if (!r) return undefined;
     // 读取期间可能通过移窗/另存为出现同路径文档，完成前再次去重。
     const existing = findTabByPath(path);
-    if (existing) { activateTab(existing.id); return existing; }
-    const tab = openTab(r.text, r.info, tierFlagsOverride(r.info.tier ?? 'Normal'));
+    if (existing) {
+      if (options.relocateExisting) placeOpenedTab(existing, options);
+      activateTab(existing.id);
+      return existing;
+    }
+    const candidate = options.reuse;
+    const reusable = candidate && isReusableUntitled(candidate.tab)
+      && tabRevision(candidate.tab) === candidate.revision
+      && (operationVersions.get(candidate.tab) ?? 0) === candidate.operationVersion;
+    let tab: Tab;
+    const flags = tierFlagsOverride(r.info.tier ?? 'Normal');
+    if (reusable) {
+      tab = candidate.tab;
+      reuseUntitled(tab, r.text, r.info, flags);
+      options.inserted?.(tab);
+    } else {
+      tab = openTab(r.text, r.info, flags);
+      placeOpenedTab(tab, options);
+    }
     addRecent(path);
     return tab;
   } catch (e) {
@@ -164,6 +232,38 @@ async function openLoaded(path: string): Promise<Tab | undefined> {
     alert(t('files.openFailed', { error: errorMessage(e) }));
     return undefined;
   }
+}
+
+export function openDroppedPaths(paths: readonly string[], placement?: TransferPlacement): Promise<void> {
+  if (isCommandExecutionBlocked()) return Promise.resolve();
+  const ids = allTabIds();
+  const current = activeTab();
+  const anchor = current?.id ?? activeSpecial()?.id;
+  const anchorIndex = anchor ? ids.indexOf(anchor) : ids.length - 1;
+  const location: OpenRequest = placement
+    ? { placement: { ...placement } }
+    : { reuse: captureReuse(current), afterId: anchor, placement: { index: anchorIndex + 1, beforeId: ids[anchorIndex + 1] } };
+  const seen = new Set<string>();
+  const uniquePaths = paths.filter(path => {
+    const key = pathKey(path);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const batch = (async () => {
+    for (const path of uniquePaths) {
+      await openRequestedPath(path, {
+        ...location,
+        relocateExisting: true,
+        inserted: tab => {
+          location.reuse = undefined;
+          location.afterId = tab.id;
+          location.placement = { index: allTabIds().indexOf(tab.id) + 1 };
+        },
+      });
+    }
+  })();
+  return trackOpenBatch(batch);
 }
 
 /** 新建未命名文件：换行符与编码取默认设置 */
