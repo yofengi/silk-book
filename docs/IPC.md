@@ -96,6 +96,7 @@ type QuitRequest = { requestId: string };
 ### Window and settings events
 
 - `open-files`: `string[]`, emitted only to the most recently focused window. The frontend decides whether to open in the current or a new window according to `window.openFilesInNewWindow`.
+- `IpcApi.onFileDrop`: subscribes to the current Webview's Tauri drag/drop events before the first window reveal. `enter` and `drop` carry paths and a position; `over` carries a position; `leave` carries neither. Positions are converted from Webview-relative physical pixels to CSS pixels using the current window's scale. Explicit file drops open in their target window and bypass the new-window preference.
 - `settings-changed`: `SettingsChanged`, emitted to all windows after `settings_patch` commits.
 - `tab-transfer-offered`: `TransferOffer`, emitted only to the bound existing recipient by `tab_transfer_send`. Install `installIncomingTransferListener()` before `window_init`. The recipient rejects offers while closing or while the command gate is blocked.
 - `quit-requested`: `QuitRequest`, emitted to all windows by `app_request_quit`; still-initializing windows receive the same request in `window_init`.

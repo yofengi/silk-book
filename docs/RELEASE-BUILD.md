@@ -31,6 +31,8 @@ The repository's `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASS
 
 Publish the complete artifact set in one Release, including `latest.json` at the version-specific download URL. Running downloads pin that version's feed so a later release does not change the selected installer. Only mark a release latest after all three platforms and signatures have passed verification.
 
+The manually dispatched `upload-release-assets.yml` workflow can upload an existing successful build to an existing draft without routing installer binaries through a local connection. Supply `build_run_id`, `release_tag`, and the full tested `source_sha`; the draft must target that SHA and contain the tested release notes. It checks the build's repository, workflow, result, and artifact identity, then verifies checksums and version-bound signatures against a checkout of that source. Matching uploaded files are skipped; unexpected files, incomplete uploads, or digest mismatches stop the job. It never deletes, overwrites, or publishes release assets. Review the final ten-asset result before marking the draft latest.
+
 ## Local commands
 
 Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/), the pnpm version from `package.json`, Node.js 22, and Rust stable. Run macOS builds on macOS.
