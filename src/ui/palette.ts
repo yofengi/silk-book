@@ -4,6 +4,7 @@ import { events } from '../core/events';
 import { keybindingFor } from '../core/keybindings';
 import { getSetting } from '../core/settings';
 import { t } from '../i18n';
+import { motionEnter, motionRemove } from './motion';
 
 export interface PickItem {
   label: string;
@@ -14,8 +15,12 @@ export interface PickItem {
 let overlay: HTMLElement | null = null;
 
 function close(): void {
-  overlay?.remove();
+  const outgoing = overlay;
   overlay = null;
+  if (outgoing) {
+    motionRemove(outgoing.children[0] as HTMLElement, 'panel');
+    motionRemove(outgoing, 'fade');
+  }
 }
 
 // 列表项与占位符在打开时已按旧语言生成：切换语言时直接关闭，再次打开即为新语言
@@ -96,6 +101,8 @@ export function openPicker(items: PickItem[], onPick: (value: string) => void, p
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
   render();
   input.focus();
+  motionEnter(overlay, 'fade');
+  motionEnter(box, 'panel');
 }
 
 export function openCommandPalette(): void {

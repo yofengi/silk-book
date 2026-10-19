@@ -5,6 +5,7 @@ import { events } from '../core/events';
 import { formatKey, keybindingFor, registerKeybinding } from '../core/keybindings';
 import { getSetting } from '../core/settings';
 import { t } from '../i18n';
+import { motionEnter, motionRemove } from './motion';
 
 type Entry =
   | { kind: 'cmd'; label: string; command: string; args?: unknown; shortcutOf?: string }
@@ -136,6 +137,7 @@ function openSub(owner: HTMLElement, build: () => Entry[], focusFirst: boolean):
   const left = r.right + 2 + w > window.innerWidth ? r.left - w - 2 : r.right + 2;
   sub.style.left = `${Math.max(4, left)}px`;
   sub.style.top = `${Math.max(4, Math.min(r.top - 5, window.innerHeight - sub.offsetHeight - 4))}px`;
+  motionEnter(sub, 'submenu');
   subOwner = owner;
   owner.setAttribute('aria-expanded', 'true');
   owner.classList.add('open');
@@ -143,11 +145,12 @@ function openSub(owner: HTMLElement, build: () => Entry[], focusFirst: boolean):
 }
 
 function closeSub(): void {
-  sub?.remove();
+  const outgoing = sub;
   sub = null;
   subOwner?.setAttribute('aria-expanded', 'false');
   subOwner?.classList.remove('open');
   subOwner = null;
+  if (outgoing) motionRemove(outgoing, 'submenu');
 }
 
 function onKey(ev: KeyboardEvent, m: HTMLElement): void {
@@ -202,6 +205,7 @@ export function openMenu(): void {
   const r = button.getBoundingClientRect();
   root.style.left = `${Math.max(4, r.left)}px`;
   root.style.top = `${r.bottom + 2}px`;
+  motionEnter(root);
   button.setAttribute('aria-expanded', 'true');
   button.classList.add('open');
   focusItem(root, 0);
@@ -215,7 +219,7 @@ const onBlur = () => closeMenu(false);
 export function closeMenu(restoreFocus: boolean): void {
   if (!root) return;
   closeSub();
-  root.remove();
+  const outgoing = root;
   root = null;
   button?.setAttribute('aria-expanded', 'false');
   button?.classList.remove('open');
@@ -224,6 +228,7 @@ export function closeMenu(restoreFocus: boolean): void {
   window.removeEventListener('resize', onBlur);
   if (restoreFocus) (returnFocus ?? button)?.focus();
   returnFocus = null;
+  motionRemove(outgoing);
 }
 
 /** 创建菜单按钮（不设 data-tauri-drag-region，避免被当作拖拽区） */

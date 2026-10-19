@@ -15,6 +15,7 @@ import { bindWindowState, registerWindowCommands } from './window';
 import { bindTabDragging } from './tab-drag';
 import { bindFileDrop } from './file-drop';
 import { createUpdateButton } from './updates';
+import { createTabRenderer, type TabItem } from './tab-renderer';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -48,8 +49,6 @@ const ICON_MIN = svg('M0 5.5h10');
 const ICON_MAX = svg('M.5 .5h9v9h-9z');
 const ICON_RESTORE = svg('M2.5 2.5h7v7h-7zM2.5 .5h7v7');
 const ICON_CLOSE = svg('M0 0l10 10M10 0L0 10');
-const ICON_GEAR = `<svg class="tab-icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>`;
-const ICON_TAB_CLOSE = `<svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true" focusable="false"><path d="M0 0l8 8M8 0L0 8" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`;
 
 function setLabel(b: HTMLElement, label: string): void {
   b.title = label;
@@ -157,56 +156,23 @@ export function mountUI(root: HTMLElement): Layout {
   root.append(header, work, overlayHost, status);
   const fileDropReady = bindFileDrop(tabBar);
 
+  const updateTabs = createTabRenderer(tabBar, (command, id) => executeCommand(command, id));
   const renderTabs = () => {
-    const nodes = new Map<string, HTMLElement>();
+    const items = new Map<string, TabItem>();
     const active = activeTab();
     for (const ft of listTabs()) {
-      const tab = el('div', `tab${ft === active ? ' active' : ''}`);
-      tab.setAttribute('role', 'tab');
-      tab.dataset.tabId = ft.id;
-      tab.setAttribute('aria-selected', String(ft === active));
-      tab.tabIndex = 0;
-      tab.title = ft.doc.path ?? t('tab.untitled');
-      const name = el('span', 'tab-name', baseName(ft.doc.path));
-      if (ft.doc.dirty) tab.classList.add('dirty');
-      const x = el('button', 'tab-close');
-      x.innerHTML = ICON_TAB_CLOSE;
-      x.type = 'button';
-      x.disabled = isTransferring(ft.id);
-      if (x.disabled) { tab.classList.add('moving'); tab.setAttribute('aria-busy', 'true'); }
-      x.setAttribute('aria-label', t('tab.closeNamed', { name: baseName(ft.doc.path) }));
-      x.addEventListener('click', (e) => { e.stopPropagation(); void executeCommand('tab.close', ft.id); });
-      tab.append(name, x);
-      tab.addEventListener('click', () => void executeCommand('tab.activate', ft.id));
-      tab.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') void executeCommand('tab.activate', ft.id); });
-      tab.addEventListener('auxclick', (e) => { if (e.button === 1) void executeCommand('tab.close', ft.id); });
-      nodes.set(ft.id, tab);
+      items.set(ft.id, {
+        id: ft.id, name: baseName(ft.doc.path), title: ft.doc.path ?? t('tab.untitled'),
+        active: ft === active, dirty: ft.doc.dirty, moving: isTransferring(ft.id),
+      });
     }
     const sp = activeSpecial();
     for (const s of listSpecialTabs()) {
-      const on = s === sp;
-      const tab = el('div', `tab special${on ? ' active' : ''}`);
-      tab.setAttribute('role', 'tab');
-      tab.dataset.tabId = s.id;
-      tab.setAttribute('aria-selected', String(on));
-      tab.tabIndex = 0;
       const title = s.title();
-      tab.title = title;
-      tab.innerHTML = ICON_GEAR;
-      const name = el('span', 'tab-name', title);
-      const x = el('button', 'tab-close');
-      x.innerHTML = ICON_TAB_CLOSE;
-      x.type = 'button';
-      x.setAttribute('aria-label', t('tab.closeNamed', { name: title }));
-      x.addEventListener('click', (e) => { e.stopPropagation(); void executeCommand('tab.close', s.id); });
-      tab.append(name, x);
-      tab.addEventListener('click', () => void executeCommand('tab.activate', s.id));
-      tab.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') void executeCommand('tab.activate', s.id); });
-      tab.addEventListener('auxclick', (e) => { if (e.button === 1) void executeCommand('tab.close', s.id); });
-      nodes.set(s.id, tab);
+      items.set(s.id, { id: s.id, name: title, title, active: s === sp, special: true });
     }
     // 文件与设置标签页共用一份显示顺序；循环快捷键、拖拽和渲染不会各自排序。
-    tabBar.replaceChildren(...allTabIds().map((id) => nodes.get(id)).filter((node): node is HTMLElement => !!node));
+    updateTabs(allTabIds().map((id) => items.get(id)).filter((item): item is TabItem => !!item));
   };
 
   const renderStatus = () => {

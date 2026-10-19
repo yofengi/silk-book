@@ -47,6 +47,7 @@ function fixture() {
   const palette = load('src/ui/palette.ts', {
     '../core/commands': commands, '../core/events': events, '../core/keybindings': keys,
     '../core/settings': settings, '../i18n': { t: (key) => key },
+    './motion': load('src/ui/motion.ts', {}, globals),
   }, globals);
   const ipc = {
     confirm: async (_message, _title, options) => {

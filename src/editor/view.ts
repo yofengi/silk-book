@@ -15,6 +15,7 @@ import { getSetting } from '../core/settings';
 import { editorPhrases } from '../i18n';
 import { smartCopyExt } from './smart-copy';
 import { spellcheckExt } from './spellcheck';
+import { nonNumericCompletion } from './completions/numeric';
 
 /** 每个 EditorState 内都带有这组 Compartment（Compartment 实例全局共享，内容按 state 独立） */
 export const compartments = {
@@ -52,8 +53,8 @@ export function minimapExt(on: boolean): Extension {
 /** 合并语言补全源与单词补全；两者都没有时不挂 autocompletion */
 export function completionExt(word: boolean, lang: CompletionSource | null = null): Extension {
   const override: CompletionSource[] = [];
-  if (lang) override.push(lang);
-  if (word) override.push(completeAnyWord);
+  if (lang) override.push(nonNumericCompletion(lang));
+  if (word) override.push(nonNumericCompletion(completeAnyWord));
   return override.length ? autocompletion({ override }) : [];
 }
 

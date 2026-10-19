@@ -5,6 +5,7 @@ import { getUpdateNotification, getUpdateState } from '../core/updates';
 import { t } from '../i18n';
 import { createUpdateProgress } from './update-progress';
 import { updateErrorText, updateResultText, updateTransferPercent, updateTransferText } from './update-text';
+import { motionEnter, motionRemove } from './motion';
 
 const DOWNLOAD_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 2v7m-3-3 3 3 3-3M3 10v3h10v-3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 let button: HTMLButtonElement | null = null;
@@ -24,12 +25,13 @@ function text(node: HTMLElement, value: string): void {
 }
 
 function closePanel(returnFocus = false): void {
-  panel?.remove();
+  const outgoing = panel;
   panel = null;
   panelNodes = null;
   panelVersion = '';
   button?.setAttribute('aria-expanded', 'false');
   if (returnFocus && button && !button.hidden && !button.disabled) button.focus();
+  if (outgoing) motionRemove(outgoing);
 }
 
 function positionPanel(): void {
@@ -119,6 +121,7 @@ function showPanel(focus = true): void {
   document.body.append(panel);
   renderPanel();
   button.setAttribute('aria-expanded', 'true');
+  if (panel) motionEnter(panel);
   if (focus) panel?.focus();
 }
 

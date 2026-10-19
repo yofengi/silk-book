@@ -143,6 +143,7 @@ function fixture(options = {}) {
       editorHost: {}, previewHost: {}, overlayHost: {}, specialHost: {}, fileDropReady: options.fileDropReady ?? Promise.resolve(),
     }; } },
     './ui/window': { windowLifecycleReady: async () => { calls.push('close-listener'); await options.lifecycle; } },
+    './ui/tooltips': { initTooltips() {} },
     './themes': { installThemeWatcher: async () => { calls.push('theme'); await options.theme; } },
     './themes/commands': { registerThemeCommands() {} }, './themes/fonts': { installFontWatcher() {} },
   }, globals);

@@ -8,6 +8,7 @@ import { languageName } from '../editor/languages';
 import { activeTab } from '../editor/tabs';
 import { t } from '../i18n';
 import type { EncodingInfo } from '../ipc';
+import { motionEnter, motionRemove } from './motion';
 
 const HOVER_OPEN_MS = 350;
 const HOVER_CLOSE_MS = 300;
@@ -143,6 +144,7 @@ async function openSub(owner: HTMLElement, e: Extract<Item, { kind: 'sub' }>, fo
   const left = parent.right + 2 + w > window.innerWidth - 4 ? parent.left - w - 2 : parent.right + 2;
   sub.style.left = `${Math.max(4, left)}px`;
   sub.style.top = `${Math.max(4, Math.min(r.top - 5, window.innerHeight - sub.offsetHeight - 4))}px`;
+  motionEnter(sub, 'submenu');
   cur.sub = sub;
   cur.subOwner = owner;
   owner.setAttribute('aria-expanded', 'true');
@@ -156,11 +158,12 @@ async function openSub(owner: HTMLElement, e: Extract<Item, { kind: 'sub' }>, fo
 function closeSub(): void {
   ++subRequest;
   if (!open) return;
-  open.sub?.remove();
+  const outgoing = open.sub;
   open.sub = null;
   open.subOwner?.setAttribute('aria-expanded', 'false');
   open.subOwner?.classList.remove('open');
   open.subOwner = null;
+  if (outgoing) motionRemove(outgoing, 'submenu');
 }
 
 function onKey(ev: KeyboardEvent, m: HTMLElement): void {
@@ -223,7 +226,6 @@ function closeAll(restoreFocus: boolean): void {
   const a = document.activeElement;
   const focusInside = o.menu.contains(a) || !!o.sub?.contains(a);
   closeSub();
-  o.menu.remove();
   o.owner.setAttribute('aria-expanded', 'false');
   o.owner.classList.remove('open');
   open = null;
@@ -233,6 +235,7 @@ function closeAll(restoreFocus: boolean): void {
   // Esc：回到状态栏按钮；其余情况（执行命令 / 指针移走）焦点归还给打开前的元素（编辑器）
   if (restoreFocus) o.owner.focus();
   else if (focusInside) (o.returnFocus?.isConnected ? o.returnFocus : null)?.focus();
+  motionRemove(o.menu, 'popup-up');
 }
 
 function openFor(owner: HTMLElement, items: Item[], label: string, viaKeyboard: boolean): void {
@@ -251,6 +254,7 @@ function openFor(owner: HTMLElement, items: Item[], label: string, viaKeyboard: 
   const left = Math.min(Math.max(4, rightAligned ? r.right - w : r.left), rightEdge - w - 4);
   menu.style.left = `${left}px`;
   menu.style.top = `${Math.max(4, r.top - menu.offsetHeight - 4)}px`;
+  motionEnter(menu, 'popup-up');
   owner.setAttribute('aria-expanded', 'true');
   owner.classList.add('open');
   open = { owner, menu, sub: null, subOwner: null, viaKeyboard, returnFocus: prev };

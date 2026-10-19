@@ -2,6 +2,7 @@ import './confirm-dialog.css';
 import { events } from '../core/events';
 import { productName, t } from '../i18n';
 import type { ConfirmOptions } from '../ipc/types';
+import { motionEnter, motionRemove } from './motion';
 
 interface Request {
   message: string;
@@ -105,6 +106,7 @@ function finish(request: Request, answer: boolean): void {
   const index = queue.indexOf(request);
   if (index >= 0) queue.splice(index, 1);
   const wasVisible = active?.request === request;
+  const outgoing = wasVisible ? active : null;
   if (wasVisible) {
     const visible = active!;
     active = null;
@@ -113,13 +115,16 @@ function finish(request: Request, answer: boolean): void {
   request.resolve(answer);
   if (wasVisible) {
     queueMicrotask(pump);
-    // Let lifecycle consumers release body.inert before restoring focus.
-    setTimeout(() => {
+    const restoreFocus = () => {
+      const focused = document.activeElement;
       if (!active && !document.body.inert && request.returnFocus?.isConnected
-        && (!document.activeElement || document.activeElement === document.body || document.activeElement === document.documentElement)) {
+        && (!focused || focused === document.body || focused === document.documentElement || outgoing?.el.contains(focused))) {
         request.returnFocus.focus({ preventScroll: true });
       }
-    }, 0);
+    };
+    restoreFocus();
+    // 等待关闭生命周期释放 body.inert。
+    setTimeout(restoreFocus, 0);
   }
 }
 
@@ -170,8 +175,17 @@ function content(el: HTMLElement, request: Request, native: HTMLDialogElement | 
     el.removeEventListener('close', reject);
     el.removeEventListener('pointerdown', outside);
     el.removeEventListener('click', outside);
+    const rect = native?.open ? el.getBoundingClientRect() : null;
+    const translate = rect && typeof getComputedStyle === 'function'
+      ? (getComputedStyle(el).translate ?? '').split(/\s+/).map(Number.parseFloat) : [];
     if (native?.open) native.close();
-    el.remove();
+    if (rect && typeof el.animate === 'function') {
+      el.classList.add('confirm-dialog-exiting');
+      el.style.left = `${rect.left - (translate[0] || 0)}px`;
+      el.style.top = `${rect.top - (translate[1] || 0)}px`;
+      el.style.width = `${rect.right - rect.left}px`;
+    }
+    motionRemove(el, 'panel');
   } };
   labels(visible);
   return visible;
@@ -190,11 +204,13 @@ function showFallback(request: Request): void {
   const cleanup = visible.cleanup;
   visible.cleanup = () => {
     cleanup();
-    overlay.remove();
+    motionRemove(overlay, 'fade');
   };
   active = visible;
   visible.message.tabIndex = visible.message.scrollHeight > visible.message.clientHeight ? 0 : -1;
   visible.cancel.focus();
+  motionEnter(overlay, 'fade');
+  motionEnter(visible.el, 'panel');
 }
 
 function pump(): void {
@@ -211,6 +227,7 @@ function pump(): void {
     dialog.showModal();
     visible.message.tabIndex = visible.message.scrollHeight > visible.message.clientHeight ? 0 : -1;
     visible.cancel.focus();
+    motionEnter(dialog, 'panel');
   } catch {
     active = null;
     visible.cleanup();

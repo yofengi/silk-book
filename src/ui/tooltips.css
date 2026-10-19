@@ -1,0 +1,24 @@
+.ui-tooltip {
+  position: fixed;
+  z-index: 180;
+  box-sizing: border-box;
+  max-width: min(440px, calc(100vw - 16px));
+  padding: 7px 10px;
+  border: 1px solid var(--float-border, var(--border));
+  border-radius: 7px;
+  background: var(--float-sheen, none), var(--float-bg, var(--editor-bg));
+  color: var(--fg);
+  box-shadow: var(--float-shadow, var(--shadow));
+  font: 12px/1.45 var(--ui-font);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  user-select: none;
+}
+
+:root[data-glass] .ui-tooltip { -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); }
+:root[data-glass].win-inactive .ui-tooltip { background: var(--float-sheen), var(--inactive-surface); }
+
+@supports not (backdrop-filter: blur(1px)) {
+  :root[data-glass] .ui-tooltip { background: var(--float-sheen), var(--inactive-surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

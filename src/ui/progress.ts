@@ -1,5 +1,6 @@
 // 可复用进度条（带取消），供 M3 大文件读取使用
 import { t } from '../i18n';
+import { motionEnter, motionRemove } from './motion';
 
 export interface ProgressHandle {
   update(done: number, total: number): void;
@@ -33,6 +34,7 @@ export function showProgress(parent: HTMLElement, label: string, onCancel?: () =
     root.append(btn);
   }
   parent.append(root);
+  motionEnter(root, 'popup-up');
   return {
     update(done, total) {
       const p = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
@@ -41,6 +43,6 @@ export function showProgress(parent: HTMLElement, label: string, onCancel?: () =
       pct.textContent = `${p}%`;
     },
     setLabel(t) { text.textContent = t; },
-    close() { root.remove(); },
+    close() { motionRemove(root, 'popup-up'); },
   };
 }

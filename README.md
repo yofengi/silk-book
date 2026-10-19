@@ -15,8 +15,10 @@
 ## 功能
 
 - 多标签编辑、拖动排序、拖出新窗口和跨窗口合并，保留尚未保存的内容。
+- 单标签隐藏关闭按钮，未保存提示继续显示；菜单、提示气泡和标签变动支持轻量动效与系统减少动态效果偏好。
 - 启动即创建可保存的未命名标签；拖入文件可复用空白标签，或在标签栏指定位置打开。
 - 代码语法高亮、查找替换、小地图、单词补全和 Markdown 预览。
+- 单词补全排除纯数字，保留带数字的变量名。
 - 自动换行、行号、当前行高亮、英文拼写检查、智能复制及 Tab 行为设置。
 - 编码和换行符读写设置；状态栏提供文件操作、编码重开与保存、换行符切换。
 - 毛玻璃与经典外观、字体设置、自定义主题和快捷键。
@@ -45,6 +47,7 @@ node scripts/test-tab-transfers.mjs
 node scripts/test-tab-merging.mjs
 node scripts/test-tab-drop.mjs
 node --experimental-vm-modules --test scripts/test-file-open-placement.mjs scripts/test-file-drop.mjs scripts/test-file-drop-adapter.mjs
+node --experimental-vm-modules --test scripts/test-word-completion.mjs scripts/test-tab-ui-motion.mjs scripts/test-ui-motion.mjs scripts/test-tooltips.mjs
 ```
 
 Windows 打包：`pnpm tauri build --bundles nsis`。macOS 打包必须在 macOS 上运行，详见 [跨平台构建说明](docs/RELEASE-BUILD.md) 和 [Windows 安装说明](docs/INSTALLER.md)。
