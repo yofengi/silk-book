@@ -1,0 +1,69 @@
+name: Upload verified assets to existing draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful Build installers run ID
+        required: true
+        type: string
+      release_tag:
+        description: Existing draft tag (vX.Y.Z)
+        required: true
+        type: string
+      source_sha:
+        description: Exact tested source commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: upload-draft-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    if: github.repository == 'yofengi/silk-book'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_HOST: github.com
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SOURCE_DIRECTORY: source
+      ASSET_DIRECTORY: release-assets
+    steps:
+      - name: Check out uploader from this workflow commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: uploader
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify successful build source and unique artifact
+        id: build
+        run: node uploader/scripts/upload-release-assets.mjs --verify-run
+      - name: Check out the exact tested release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.build.outputs.source_sha }}
+          path: source
+          persist-credentials: false
+      - name: Download the verified build artifact
+        uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ steps.build.outputs.artifact_id }}
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          repository: yofengi/silk-book
+          path: release-assets
+          merge-multiple: true
+      - name: Verify signatures and upload only missing draft assets
+        run: node uploader/scripts/upload-release-assets.mjs
